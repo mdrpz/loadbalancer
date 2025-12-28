@@ -1,6 +1,3 @@
-#include "core/load_balancer.h"
-#include "core/backend_node.h"
-#include <stdexcept>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -10,6 +7,10 @@
 #include <errno.h>
 #include <algorithm>
 #include <cstring>
+#include <chrono>
+#include <stdexcept>
+#include "core/load_balancer.h"
+#include "core/backend_node.h"
 
 namespace lb::core {
 
@@ -107,13 +108,24 @@ void LoadBalancer::connect_to_backend(std::unique_ptr<net::Connection> client_co
 
     // Set socket options
     int opt = 1;
-    setsockopt(backend_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (setsockopt(backend_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        // Failed to set socket option, but continue anyway (non-critical)
+        // Could log warning here in Phase 2
+    }
 
     // Connect to backend
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(backend_node->port());
-    inet_pton(AF_INET, backend_node->host().c_str(), &addr.sin_addr);
+    
+    // Validate IP address
+    if (inet_pton(AF_INET, backend_node->host().c_str(), &addr.sin_addr) <= 0) {
+        // Invalid IP address
+        backend_node->increment_failures();
+        client_conn->close();
+        ::close(backend_fd);
+        return;
+    }
 
     int result = connect(backend_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
     
@@ -146,9 +158,14 @@ void LoadBalancer::connect_to_backend(std::unique_ptr<net::Connection> client_co
     int backend_fd_stored = backend_conn->fd();
     connections_[client_fd] = std::move(client_conn);
     connections_[backend_fd_stored] = std::move(backend_conn);
+    
+    // Track backend connection and start time
+    backend_connections_[backend_fd_stored] = backend_node;
+    connection_times_[backend_fd_stored] = std::chrono::steady_clock::now();
 
     // Register client with reactor (level-triggered, default)
-    reactor_->add_fd(client_fd, EPOLLIN,
+    // Monitor both read and write events
+    reactor_->add_fd(client_fd, EPOLLIN | EPOLLOUT,
                      [this](int fd, net::EventType type) {
                          handle_client_event(fd, type);
                      });
@@ -170,22 +187,74 @@ void LoadBalancer::handle_client_event(int fd, net::EventType type) {
         return;
     }
 
+    // Validate connection state
+    if (conn->state() == net::ConnectionState::CLOSED) {
+        return;
+    }
+
     if (type == net::EventType::ERROR || type == net::EventType::HUP) {
         close_connection(fd);
         return;
     }
 
     if (type == net::EventType::READ) {
+        // Only read if connection is established
+        if (conn->state() != net::ConnectionState::ESTABLISHED) {
+            return;
+        }
+
         // Read from client
-        if (!conn->read_from_fd()) {
-            // Error or EOF
+        bool read_success = conn->read_from_fd();
+        
+        // Forward any data that was read (even if EOF was received)
+        if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+            if (!conn->read_buffer().empty()) {
+                forward_data(conn, conn->peer());
+            }
+        }
+        
+        // Handle EOF from client - shutdown write side but keep connection open to receive backend response
+        if (!read_success) {
+            // Forward any remaining data in read buffer before shutting down
+            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                if (!conn->read_buffer().empty()) {
+                    forward_data(conn, conn->peer());
+                }
+            }
+            
+            // Shutdown write side of client socket (no more data to send)
+            if (conn->fd() >= 0) {
+                ::shutdown(conn->fd(), SHUT_WR);
+            }
+            // Shutdown write side of backend socket (no more data will come from client)
+            if (conn->peer() && conn->peer()->fd() >= 0) {
+                ::shutdown(conn->peer()->fd(), SHUT_WR);
+            }
+            // Don't close yet - wait for backend to finish sending response
+            // The connection will be closed when backend sends EOF
+            return;
+        }
+    }
+
+    if (type == net::EventType::WRITE) {
+        // Only write if connection is established
+        if (conn->state() != net::ConnectionState::ESTABLISHED) {
+            return;
+        }
+
+        // Write to client
+        if (!conn->write_to_fd()) {
+            // Error writing
             close_connection(fd);
             return;
         }
 
-        // Forward to backend
-        if (conn->peer()) {
-            forward_data(conn, conn->peer());
+        // If write buffer is empty, we can read more from peer
+        if (conn->write_buffer().empty() && conn->peer()) {
+            // Re-enable read on peer if it was disabled due to backpressure
+            if (conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+            }
         }
     }
 }
@@ -196,6 +265,11 @@ void LoadBalancer::handle_backend_event(int fd, net::EventType type) {
         return;
     }
 
+    // Validate connection state
+    if (conn->state() == net::ConnectionState::CLOSED) {
+        return;
+    }
+
     if (type == net::EventType::ERROR || type == net::EventType::HUP) {
         close_connection(fd);
         return;
@@ -203,37 +277,90 @@ void LoadBalancer::handle_backend_event(int fd, net::EventType type) {
 
     // Check if connection just completed
     if (conn->state() == net::ConnectionState::CONNECTING) {
+        // Check for timeout (5 seconds default per plan)
+        auto it_time = connection_times_.find(fd);
+        if (it_time != connection_times_.end()) {
+            auto elapsed = std::chrono::steady_clock::now() - it_time->second;
+            if (elapsed > std::chrono::seconds(5)) {
+                // Connection timeout
+                auto backend_it = backend_connections_.find(fd);
+                if (backend_it != backend_connections_.end()) {
+                    if (auto backend_node = backend_it->second.lock()) {
+                        backend_node->increment_failures();
+                    }
+                }
+                close_connection(fd);
+                return;
+            }
+        }
+        
         int error = 0;
         socklen_t len = sizeof(error);
         if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
             // Connection successful
             conn->set_state(net::ConnectionState::ESTABLISHED);
-            // Find backend node and increment connection count
-            // (We'll need to track this better in Phase 2)
+            
+            // Increment connection count on backend node
+            auto backend_it = backend_connections_.find(fd);
+            if (backend_it != backend_connections_.end()) {
+                if (auto backend_node = backend_it->second.lock()) {
+                    backend_node->increment_connections();
+                }
+            }
+            
             // Update epoll to also monitor for reads
             reactor_->mod_fd(fd, EPOLLIN | EPOLLOUT);
+            
+            // Check if client has pending data to forward
+            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                // Forward any data that was already read from client while backend was connecting
+                if (!conn->peer()->read_buffer().empty()) {
+                    forward_data(conn->peer(), conn);
+                }
+            }
         } else {
             // Connection failed
+            auto backend_it = backend_connections_.find(fd);
+            if (backend_it != backend_connections_.end()) {
+                if (auto backend_node = backend_it->second.lock()) {
+                    backend_node->increment_failures();
+                }
+            }
             close_connection(fd);
             return;
         }
     }
 
     if (type == net::EventType::READ) {
-        // Read from backend
-        if (!conn->read_from_fd()) {
-            // Error or EOF
-            close_connection(fd);
+        // Only read if connection is established
+        if (conn->state() != net::ConnectionState::ESTABLISHED) {
             return;
         }
 
-        // Forward to client
-        if (conn->peer()) {
-            forward_data(conn, conn->peer());
+        // Read from backend
+        bool read_success = conn->read_from_fd();
+        
+        // Forward any data that was read (even if EOF was received)
+        if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+            if (!conn->read_buffer().empty()) {
+                forward_data(conn, conn->peer());
+            }
+        }
+        
+        // Only close on error or EOF after forwarding any remaining data
+        if (!read_success) {
+            // Error or EOF - close connection
+            close_connection(fd);
+            return;
         }
     }
 
     if (type == net::EventType::WRITE) {
+        // Only write if connection is established
+        if (conn->state() != net::ConnectionState::ESTABLISHED) {
+            return;
+        }
+
         // Write to backend
         if (!conn->write_to_fd()) {
             // Error writing
@@ -243,14 +370,22 @@ void LoadBalancer::handle_backend_event(int fd, net::EventType type) {
 
         // If write buffer is empty, we can read more from peer
         if (conn->write_buffer().empty() && conn->peer()) {
-            // Re-enable read on peer if it was disabled
-            reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+            // Re-enable read on peer if it was disabled due to backpressure
+            if (conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+            }
         }
     }
 }
 
 void LoadBalancer::forward_data(net::Connection* from, net::Connection* to) {
     if (!from || !to) {
+        return;
+    }
+
+    // Validate both connections are established
+    if (from->state() != net::ConnectionState::ESTABLISHED ||
+        to->state() != net::ConnectionState::ESTABLISHED) {
         return;
     }
 
@@ -266,6 +401,7 @@ void LoadBalancer::forward_data(net::Connection* from, net::Connection* to) {
     size_t available = to->write_available();
     if (available == 0) {
         // Destination buffer full - stop reading from source
+        // Only disable reads, keep writes enabled
         reactor_->mod_fd(from->fd(), EPOLLOUT);
         return;
     }
@@ -278,6 +414,10 @@ void LoadBalancer::forward_data(net::Connection* from, net::Connection* to) {
     // Enable write events on destination
     reactor_->mod_fd(to->fd(), EPOLLIN | EPOLLOUT);
 
+    // Re-enable reads on source if we had disabled them due to backpressure
+    // and now there's space in destination
+    reactor_->mod_fd(from->fd(), EPOLLIN | EPOLLOUT);
+
     // Try to write immediately
     if (!to->write_to_fd()) {
         close_connection(to->fd());
@@ -288,18 +428,80 @@ void LoadBalancer::forward_data(net::Connection* from, net::Connection* to) {
 void LoadBalancer::close_connection(int fd) {
     auto it = connections_.find(fd);
     if (it == connections_.end()) {
-        return;
+        return; // Already closed or never existed
     }
 
     auto* conn = it->second.get();
-    if (conn && conn->peer()) {
-        // Close peer connection too
-        int peer_fd = conn->peer()->fd();
-        reactor_->del_fd(peer_fd);
-        connections_.erase(peer_fd);
+    if (!conn) {
+        connections_.erase(it);
+        return;
     }
 
+    // Mark connection as closed to prevent race conditions
+    if (conn->state() == net::ConnectionState::CLOSED) {
+        // Already being closed or closed - make cleanup idempotent
+        // Just clean up tracking maps
+        backend_connections_.erase(fd);
+        connection_times_.erase(fd);
+        connections_.erase(it);
+        return;
+    }
+
+    // Mark as closed before cleanup to prevent races
+    conn->set_state(net::ConnectionState::CLOSED);
+    
+    // If this is a backend connection, decrement connection count
+    auto backend_it = backend_connections_.find(fd);
+    if (backend_it != backend_connections_.end()) {
+        if (auto backend_node = backend_it->second.lock()) {
+            backend_node->decrement_connections();
+        }
+        backend_connections_.erase(backend_it);
+    }
+    
+    // Clean up connection time tracking
+    connection_times_.erase(fd);
+    
+    // Handle peer connection cleanup (with race condition protection)
+    if (conn->peer()) {
+        int peer_fd = conn->peer()->fd();
+        
+        // Clear peer pointer to break circular reference
+        conn->set_peer(nullptr);
+        
+        // Check if peer connection still exists and isn't already closed
+        auto peer_it = connections_.find(peer_fd);
+        if (peer_it != connections_.end()) {
+            auto* peer_conn = peer_it->second.get();
+            if (peer_conn && peer_conn->state() != net::ConnectionState::CLOSED) {
+                // Clear peer's pointer to us
+                peer_conn->set_peer(nullptr);
+                
+                // Clean up peer's backend tracking if it's a backend connection
+                auto peer_backend_it = backend_connections_.find(peer_fd);
+                if (peer_backend_it != backend_connections_.end()) {
+                    if (auto backend_node = peer_backend_it->second.lock()) {
+                        backend_node->decrement_connections();
+                    }
+                    backend_connections_.erase(peer_backend_it);
+                }
+                connection_times_.erase(peer_fd);
+                
+                // Remove from reactor (safe even if already removed)
+                reactor_->del_fd(peer_fd);
+                
+                // Close and remove peer connection
+                peer_conn->close();
+                connections_.erase(peer_it);
+            }
+        }
+    }
+
+    // Remove from reactor (safe even if already removed)
     reactor_->del_fd(fd);
+    
+    // Close connection and remove from map
+    conn->close();
     connections_.erase(it);
 }
 

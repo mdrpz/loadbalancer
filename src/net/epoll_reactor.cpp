@@ -1,6 +1,7 @@
 #include "net/epoll_reactor.h"
 #include <sys/epoll.h>
 #include <unistd.h>
+#include <errno.h>
 #include <unordered_map>
 #include <stdexcept>
 
@@ -42,7 +43,10 @@ bool EpollReactor::mod_fd(int fd, uint32_t events) {
 bool EpollReactor::del_fd(int fd) {
     epoll_event ev{}; // epoll_ctl with EPOLL_CTL_DEL ignores ev
     bool result = epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, &ev) == 0;
-    callbacks_.erase(fd);
+    // Ignore error if fd was already removed (EBADF or ENOENT)
+    if (result || (errno != EBADF && errno != ENOENT)) {
+        callbacks_.erase(fd);
+    }
     return result;
 }
 

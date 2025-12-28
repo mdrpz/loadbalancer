@@ -4,8 +4,10 @@
 #include "net/tcp_listener.h"
 #include "net/connection.h"
 #include "core/backend_pool.h"
+#include "core/backend_node.h"
 #include <memory>
 #include <unordered_map>
+#include <chrono>
 
 namespace lb::core {
 
@@ -39,6 +41,12 @@ private:
     
     // Track all active connections
     std::unordered_map<int, std::unique_ptr<net::Connection>> connections_;
+    
+    // Track backend node for each backend connection (fd -> backend_node)
+    std::unordered_map<int, std::weak_ptr<BackendNode>> backend_connections_;
+    
+    // Track connection start time for timeout (fd -> timestamp)
+    std::unordered_map<int, std::chrono::steady_clock::time_point> connection_times_;
 };
 
 } // namespace lb::core
