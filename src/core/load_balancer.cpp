@@ -11,15 +11,23 @@
 #include <stdexcept>
 #include "core/load_balancer.h"
 #include "core/backend_node.h"
+#include "health/health_checker.h"
 
 namespace lb::core {
 
-LoadBalancer::LoadBalancer() {
+LoadBalancer::LoadBalancer() 
+    : max_global_connections_(1000), max_connections_per_backend_(100) {
     reactor_ = std::make_unique<net::EpollReactor>();
     backend_pool_ = std::make_unique<BackendPool>();
+    health_checker_ = std::make_unique<lb::health::HealthChecker>();
 }
 
 LoadBalancer::~LoadBalancer() {
+    // Stop health checker
+    if (health_checker_) {
+        health_checker_->stop();
+    }
+    
     // Close all connections
     for (auto& [fd, conn] : connections_) {
         if (conn) {
@@ -51,6 +59,11 @@ bool LoadBalancer::initialize(const std::string& listen_host, uint16_t listen_po
         return false;
     }
     
+    // Start health checker
+    if (health_checker_) {
+        health_checker_->start();
+    }
+    
     return true;
 }
 
@@ -61,6 +74,12 @@ void LoadBalancer::run() {
 }
 
 void LoadBalancer::stop() {
+    // Stop health checker
+    if (health_checker_) {
+        health_checker_->stop();
+    }
+    
+    // Stop reactor
     if (reactor_) {
         reactor_->stop();
     }
@@ -69,6 +88,11 @@ void LoadBalancer::stop() {
 void LoadBalancer::add_backend(const std::string& host, uint16_t port) {
     auto backend = std::make_shared<BackendNode>(host, port);
     backend_pool_->add_backend(backend);
+    
+    // Register with health checker
+    if (health_checker_) {
+        health_checker_->add_backend(backend);
+    }
 }
 
 void LoadBalancer::handle_accept() {
@@ -81,6 +105,15 @@ void LoadBalancer::handle_accept() {
             break; // Error accepting
         }
 
+        // Check global connection limit
+        // Count established connection pairs (client + backend = 1 connection)
+        size_t established_count = count_established_connections();
+        if (established_count >= max_global_connections_) {
+            // Reject connection - close immediately
+            ::close(client_fd);
+            continue;
+        }
+
         // Create client connection
         auto client_conn = std::make_unique<net::Connection>(client_fd);
         client_conn->set_state(net::ConnectionState::ESTABLISHED);
@@ -91,10 +124,10 @@ void LoadBalancer::handle_accept() {
 }
 
 void LoadBalancer::connect_to_backend(std::unique_ptr<net::Connection> client_conn) {
-    // Select backend
-    auto backend_node = backend_pool_->select_backend();
+    // Select backend (with connection limit check)
+    auto backend_node = backend_pool_->select_backend(max_connections_per_backend_);
     if (!backend_node) {
-        // No healthy backends available
+        // No healthy backends available (all at limit or unhealthy)
         client_conn->close();
         return;
     }
@@ -511,6 +544,23 @@ net::Connection* LoadBalancer::get_connection(int fd) {
         return nullptr;
     }
     return it->second.get();
+}
+
+size_t LoadBalancer::count_established_connections() const {
+    // Count client connections that are established
+    // Client connections are those not in backend_connections_ map
+    // We count all established client connections (even if backend is still connecting)
+    size_t count = 0;
+    for (const auto& [fd, conn] : connections_) {
+        // Check if this is a client connection (not a backend connection)
+        if (backend_connections_.find(fd) == backend_connections_.end()) {
+            // This is a client connection
+            if (conn && conn->state() == net::ConnectionState::ESTABLISHED) {
+                count++;
+            }
+        }
+    }
+    return count;
 }
 
 } // namespace lb::core

@@ -20,7 +20,8 @@ public:
     void remove_backend(const std::string& host, uint16_t port);
     
     // Select next backend for routing
-    std::shared_ptr<BackendNode> select_backend();
+    // max_connections_per_backend: 0 means no limit
+    std::shared_ptr<BackendNode> select_backend(uint32_t max_connections_per_backend = 0);
     
     void set_algorithm(RoutingAlgorithm algorithm) { algorithm_ = algorithm; }
     RoutingAlgorithm algorithm() const { return algorithm_; }

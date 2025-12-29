@@ -21,21 +21,25 @@ void BackendPool::remove_backend(const std::string& host, uint16_t port) {
     );
 }
 
-std::shared_ptr<BackendNode> BackendPool::select_backend() {
+std::shared_ptr<BackendNode> BackendPool::select_backend(uint32_t max_connections_per_backend) {
     if (backends_.empty()) {
         return nullptr;
     }
 
-    // Filter to only healthy backends
+    // Filter to only healthy backends that are under their connection limit
     std::vector<std::shared_ptr<BackendNode>> healthy;
     for (const auto& backend : backends_) {
         if (backend->state() == BackendState::HEALTHY) {
-            healthy.push_back(backend);
+            // Check connection limit (0 means no limit)
+            if (max_connections_per_backend == 0 || 
+                backend->active_connections() < max_connections_per_backend) {
+                healthy.push_back(backend);
+            }
         }
     }
 
     if (healthy.empty()) {
-        return nullptr; // No healthy backends
+        return nullptr; // No healthy backends available (all at limit or unhealthy)
     }
 
     if (algorithm_ == RoutingAlgorithm::ROUND_ROBIN) {
