@@ -6,6 +6,12 @@
 #include "core/backend_pool.h"
 #include "core/backend_node.h"
 #include "health/health_checker.h"
+#include "core/connection_manager.h"
+#include "core/event_handlers.h"
+#include "core/backend_connector.h"
+#include "core/data_forwarder.h"
+#include "core/backpressure_manager.h"
+#include "core/retry_handler.h"
 #include <memory>
 #include <unordered_map>
 #include <chrono>
@@ -27,15 +33,6 @@ public:
 private:
     // Connection management
     void handle_accept();
-    void handle_client_event(int fd, net::EventType type);
-    void handle_backend_event(int fd, net::EventType type);
-    void connect_to_backend_with_retry(std::unique_ptr<net::Connection> client_conn, int retry_count = 0);
-    void forward_data(net::Connection* from, net::Connection* to);
-    void close_connection(int fd);
-    void close_backend_connection_only(int backend_fd);
-    
-    // Helper to get connection by fd
-    net::Connection* get_connection(int fd);
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -66,20 +63,17 @@ private:
     std::unordered_map<int, std::chrono::steady_clock::time_point> backpressure_start_times_;
     uint32_t backpressure_timeout_ms_;
     
-    // Helper to count established connections (client + backend pairs)
-    size_t count_established_connections() const;
-    
-    // Backpressure helpers
-    void check_backpressure_timeout(int fd);
-    void start_backpressure_tracking(int fd);
-    void clear_backpressure_tracking(int fd);
-    
-    // Failure handling and retry
-    void retry_with_next_backend(std::unique_ptr<net::Connection> client_conn, int retry_count);
-    
     // Retry configuration
     static constexpr int MAX_RETRY_ATTEMPTS = 3;
     uint32_t connection_timeout_seconds_;
+    
+    // Helper classes
+    std::unique_ptr<ConnectionManager> connection_manager_;
+    std::unique_ptr<EventHandlers> event_handlers_;
+    std::unique_ptr<BackendConnector> backend_connector_;
+    std::unique_ptr<DataForwarder> data_forwarder_;
+    std::unique_ptr<BackpressureManager> backpressure_manager_;
+    std::unique_ptr<RetryHandler> retry_handler_;
 };
 
 } // namespace lb::core
