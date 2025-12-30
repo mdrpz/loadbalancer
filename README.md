@@ -60,7 +60,7 @@ routing:
 
 ## Running
 
-The load balancer currently accepts backends via command-line arguments. Configuration file support is planned for Phase 3.
+The load balancer currently accepts backends via command-line arguments.
 
 ### Basic Usage
 
@@ -90,8 +90,6 @@ The load balancer currently accepts backends via command-line arguments. Configu
 - `port`: Port to listen on (default: 8080)
 - `host`: Host address to bind to (default: 0.0.0.0)
 - `backends`: Comma-separated list of backend addresses in `host:port` format
-
-**Note:** Configuration file support (YAML) is planned for Phase 3. Currently, backends must be specified via command-line arguments.
 
 ## Testing
 
@@ -192,10 +190,29 @@ python3 test_backend.py 8001
 
 The load balancer will distribute connections across the available backends.
 
+#### Advanced Testing
+
+**Health Checker:**
+- Start a backend, then stop it - the health checker should mark it as UNHEALTHY
+- Restart the backend - it should be marked HEALTHY again after 2 successful checks
+- Health checks run every 5 seconds by default
+
+**Connection Limits:**
+- Try connecting more than 100 clients to a single backend - excess connections should be rejected
+- Try connecting more than 1000 total clients - excess should be rejected globally
+
+**Backpressure:**
+- Send data faster than the backend can consume - the load balancer should handle it gracefully
+- If a backend is too slow (>10 seconds), the connection should timeout and close
+
+**Failure Handling & Retry:**
+- Start load balancer with a non-existent backend - it should retry up to 3 times
+- Mix healthy and unhealthy backends - should retry and eventually connect to healthy one
+- Stop a backend during connection - should retry with next backend
+
 ## Implementation Phases
 
-1. **Phase 1**: Core forwarder (MVP)
-2. **Phase 2**: Stability layer (health checks, backpressure)
+1. **Phase 1**: Core forwarder (MVP) X
+2. **Phase 2**: Stability layer (health checks, backpressure, connection limits, failure handling) X
 3. **Phase 3**: Operability (config, metrics, logging)
 4. **Phase 4**: Enhancements (TLS, zero-copy, polish)
-

@@ -16,7 +16,8 @@
 namespace lb::core {
 
 LoadBalancer::LoadBalancer() 
-    : max_global_connections_(1000), max_connections_per_backend_(100) {
+    : max_global_connections_(1000), max_connections_per_backend_(100),
+      backpressure_timeout_ms_(10000), connection_timeout_seconds_(5) {
     reactor_ = std::make_unique<net::EpollReactor>();
     backend_pool_ = std::make_unique<BackendPool>();
     health_checker_ = std::make_unique<lb::health::HealthChecker>();
@@ -119,11 +120,11 @@ void LoadBalancer::handle_accept() {
         client_conn->set_state(net::ConnectionState::ESTABLISHED);
         
         // Route to backend
-        connect_to_backend(std::move(client_conn));
+        connect_to_backend_with_retry(std::move(client_conn), 0);
     }
 }
 
-void LoadBalancer::connect_to_backend(std::unique_ptr<net::Connection> client_conn) {
+void LoadBalancer::connect_to_backend_with_retry(std::unique_ptr<net::Connection> client_conn, int retry_count) {
     // Select backend (with connection limit check)
     auto backend_node = backend_pool_->select_backend(max_connections_per_backend_);
     if (!backend_node) {
@@ -166,10 +167,13 @@ void LoadBalancer::connect_to_backend(std::unique_ptr<net::Connection> client_co
     auto backend_conn = std::make_unique<net::Connection>(backend_fd);
     
     if (result < 0 && errno != EINPROGRESS) {
-        // Connection failed immediately
+        // Connection failed immediately - retry with next backend
         backend_node->increment_failures();
-        client_conn->close();
         backend_conn->close();
+        ::close(backend_fd);
+        
+        // Retry with next backend
+        retry_with_next_backend(std::move(client_conn), retry_count);
         return;
     }
 
@@ -195,6 +199,10 @@ void LoadBalancer::connect_to_backend(std::unique_ptr<net::Connection> client_co
     // Track backend connection and start time
     backend_connections_[backend_fd_stored] = backend_node;
     connection_times_[backend_fd_stored] = std::chrono::steady_clock::now();
+    
+    // Track client connection for retry purposes
+    backend_to_client_map_[backend_fd_stored] = client_fd;
+    client_retry_counts_[client_fd] = retry_count;
 
     // Register client with reactor (level-triggered, default)
     // Monitor both read and write events
@@ -224,6 +232,9 @@ void LoadBalancer::handle_client_event(int fd, net::EventType type) {
     if (conn->state() == net::ConnectionState::CLOSED) {
         return;
     }
+
+    // Check backpressure timeout before processing events
+    check_backpressure_timeout(fd);
 
     if (type == net::EventType::ERROR || type == net::EventType::HUP) {
         close_connection(fd);
@@ -282,11 +293,18 @@ void LoadBalancer::handle_client_event(int fd, net::EventType type) {
             return;
         }
 
-        // If write buffer is empty, we can read more from peer
-        if (conn->write_buffer().empty() && conn->peer()) {
+        // If write buffer is empty, clear backpressure tracking
+        if (conn->write_buffer().empty()) {
+            // Clear backpressure for this connection
+            clear_backpressure_tracking(fd);
+            
             // Re-enable read on peer if it was disabled due to backpressure
-            if (conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
-                reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+            if (conn->peer()) {
+                if (conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                    reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+                    // Clear backpressure for peer as well
+                    clear_backpressure_tracking(conn->peer()->fd());
+                }
             }
         }
     }
@@ -303,25 +321,90 @@ void LoadBalancer::handle_backend_event(int fd, net::EventType type) {
         return;
     }
 
+    // Check backpressure timeout before processing events
+    check_backpressure_timeout(fd);
+
     if (type == net::EventType::ERROR || type == net::EventType::HUP) {
+        // Check if this is a backend connection that can be retried
+        if (conn->state() == net::ConnectionState::CONNECTING) {
+            // Backend connection error during connect - retry
+            auto backend_it = backend_connections_.find(fd);
+            if (backend_it != backend_connections_.end()) {
+                if (auto backend_node = backend_it->second.lock()) {
+                    backend_node->increment_failures();
+                }
+            }
+            
+            // Get client connection for retry
+            auto client_it = backend_to_client_map_.find(fd);
+            if (client_it != backend_to_client_map_.end()) {
+                int client_fd = client_it->second;
+                auto client_conn_it = connections_.find(client_fd);
+                if (client_conn_it != connections_.end()) {
+                    // Get retry count
+                    int retry_count = 0;
+                    auto retry_it = client_retry_counts_.find(client_fd);
+                    if (retry_it != client_retry_counts_.end()) {
+                        retry_count = retry_it->second;
+                    }
+                    
+                    // Remove backend connection before retry
+                    close_backend_connection_only(fd);
+                    
+                    // Retry with next backend
+                    auto client_conn = std::move(client_conn_it->second);
+                    connections_.erase(client_conn_it);
+                    retry_with_next_backend(std::move(client_conn), retry_count);
+                    return;
+                }
+            }
+        }
+        
+        // For established connections or if retry not possible, just close
         close_connection(fd);
         return;
     }
 
     // Check if connection just completed
     if (conn->state() == net::ConnectionState::CONNECTING) {
-        // Check for timeout (5 seconds default per plan)
+        // Check for timeout
         auto it_time = connection_times_.find(fd);
         if (it_time != connection_times_.end()) {
             auto elapsed = std::chrono::steady_clock::now() - it_time->second;
-            if (elapsed > std::chrono::seconds(5)) {
-                // Connection timeout
+            if (elapsed > std::chrono::seconds(connection_timeout_seconds_)) {
+                // Connection timeout - retry with next backend
                 auto backend_it = backend_connections_.find(fd);
                 if (backend_it != backend_connections_.end()) {
                     if (auto backend_node = backend_it->second.lock()) {
                         backend_node->increment_failures();
                     }
                 }
+                
+                // Get client connection for retry
+                auto client_it = backend_to_client_map_.find(fd);
+                if (client_it != backend_to_client_map_.end()) {
+                    int client_fd = client_it->second;
+                    auto client_conn_it = connections_.find(client_fd);
+                    if (client_conn_it != connections_.end()) {
+                        // Get retry count
+                        int retry_count = 0;
+                        auto retry_it = client_retry_counts_.find(client_fd);
+                        if (retry_it != client_retry_counts_.end()) {
+                            retry_count = retry_it->second;
+                        }
+                        
+                        // Remove backend connection before retry
+                        close_backend_connection_only(fd);
+                        
+                        // Retry with next backend
+                        auto client_conn = std::move(client_conn_it->second);
+                        connections_.erase(client_conn_it);
+                        retry_with_next_backend(std::move(client_conn), retry_count);
+                        return;
+                    }
+                }
+                
+                // Fallback: just close if we can't find client
                 close_connection(fd);
                 return;
             }
@@ -352,13 +435,43 @@ void LoadBalancer::handle_backend_event(int fd, net::EventType type) {
                 }
             }
         } else {
-            // Connection failed
-            auto backend_it = backend_connections_.find(fd);
-            if (backend_it != backend_connections_.end()) {
-                if (auto backend_node = backend_it->second.lock()) {
-                    backend_node->increment_failures();
+            // Connection failed - check error code and retry
+            int error = 0;
+            socklen_t len = sizeof(error);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
+                auto backend_it = backend_connections_.find(fd);
+                if (backend_it != backend_connections_.end()) {
+                    if (auto backend_node = backend_it->second.lock()) {
+                        backend_node->increment_failures();
+                    }
+                }
+                
+                // Get client connection for retry
+                auto client_it = backend_to_client_map_.find(fd);
+                if (client_it != backend_to_client_map_.end()) {
+                    int client_fd = client_it->second;
+                    auto client_conn_it = connections_.find(client_fd);
+                    if (client_conn_it != connections_.end()) {
+                        // Get retry count
+                        int retry_count = 0;
+                        auto retry_it = client_retry_counts_.find(client_fd);
+                        if (retry_it != client_retry_counts_.end()) {
+                            retry_count = retry_it->second;
+                        }
+                        
+                        // Remove backend connection before retry
+                        close_backend_connection_only(fd);
+                        
+                        // Retry with next backend (for ECONNREFUSED or other errors)
+                        auto client_conn = std::move(client_conn_it->second);
+                        connections_.erase(client_conn_it);
+                        retry_with_next_backend(std::move(client_conn), retry_count);
+                        return;
+                    }
                 }
             }
+            
+            // Fallback: just close if we can't retry
             close_connection(fd);
             return;
         }
@@ -401,11 +514,18 @@ void LoadBalancer::handle_backend_event(int fd, net::EventType type) {
             return;
         }
 
-        // If write buffer is empty, we can read more from peer
-        if (conn->write_buffer().empty() && conn->peer()) {
+        // If write buffer is empty, clear backpressure tracking
+        if (conn->write_buffer().empty()) {
+            // Clear backpressure for this connection
+            clear_backpressure_tracking(fd);
+            
             // Re-enable read on peer if it was disabled due to backpressure
-            if (conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
-                reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+            if (conn->peer()) {
+                if (conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                    reactor_->mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+                    // Clear backpressure for peer as well
+                    clear_backpressure_tracking(conn->peer()->fd());
+                }
             }
         }
     }
@@ -433,11 +553,17 @@ void LoadBalancer::forward_data(net::Connection* from, net::Connection* to) {
     // Check if destination buffer has space
     size_t available = to->write_available();
     if (available == 0) {
-        // Destination buffer full - stop reading from source
+        // Destination buffer full - start backpressure tracking
+        start_backpressure_tracking(from->fd());
+        
+        // Stop reading from source
         // Only disable reads, keep writes enabled
         reactor_->mod_fd(from->fd(), EPOLLOUT);
         return;
     }
+
+    // Buffer has space - clear backpressure if it was active
+    clear_backpressure_tracking(from->fd());
 
     // Copy data
     size_t to_copy = std::min(read_buf.size(), available);
@@ -476,6 +602,9 @@ void LoadBalancer::close_connection(int fd) {
         // Just clean up tracking maps
         backend_connections_.erase(fd);
         connection_times_.erase(fd);
+        backpressure_start_times_.erase(fd);
+        client_retry_counts_.erase(fd);
+        backend_to_client_map_.erase(fd);
         connections_.erase(it);
         return;
     }
@@ -494,6 +623,22 @@ void LoadBalancer::close_connection(int fd) {
     
     // Clean up connection time tracking
     connection_times_.erase(fd);
+    
+    // Clean up backpressure tracking
+    backpressure_start_times_.erase(fd);
+    
+    // Clean up retry tracking
+    client_retry_counts_.erase(fd);
+    backend_to_client_map_.erase(fd);
+    
+    // Also remove from backend_to_client_map if this is a backend connection
+    for (auto it = backend_to_client_map_.begin(); it != backend_to_client_map_.end();) {
+        if (it->second == fd) {
+            it = backend_to_client_map_.erase(it);
+        } else {
+            ++it;
+        }
+    }
     
     // Handle peer connection cleanup (with race condition protection)
     if (conn->peer()) {
@@ -519,6 +664,9 @@ void LoadBalancer::close_connection(int fd) {
                     backend_connections_.erase(peer_backend_it);
                 }
                 connection_times_.erase(peer_fd);
+                backpressure_start_times_.erase(peer_fd);
+                client_retry_counts_.erase(peer_fd);
+                backend_to_client_map_.erase(peer_fd);
                 
                 // Remove from reactor (safe even if already removed)
                 reactor_->del_fd(peer_fd);
@@ -561,6 +709,91 @@ size_t LoadBalancer::count_established_connections() const {
         }
     }
     return count;
+}
+
+void LoadBalancer::check_backpressure_timeout(int fd) {
+    auto it = backpressure_start_times_.find(fd);
+    if (it == backpressure_start_times_.end()) {
+        return; // Not under backpressure
+    }
+    
+    auto elapsed = std::chrono::steady_clock::now() - it->second;
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+    
+    if (elapsed_ms >= static_cast<int64_t>(backpressure_timeout_ms_)) {
+        // Backpressure timeout exceeded - close connection
+        close_connection(fd);
+    }
+}
+
+void LoadBalancer::start_backpressure_tracking(int fd) {
+    // Only start tracking if not already tracking (avoid updating timestamp unnecessarily)
+    auto it = backpressure_start_times_.find(fd);
+    if (it == backpressure_start_times_.end()) {
+        backpressure_start_times_[fd] = std::chrono::steady_clock::now();
+    }
+}
+
+void LoadBalancer::clear_backpressure_tracking(int fd) {
+    backpressure_start_times_.erase(fd);
+}
+
+void LoadBalancer::close_backend_connection_only(int backend_fd) {
+    // Close only the backend connection, not the client
+    // Used when retrying with a different backend
+    auto it = connections_.find(backend_fd);
+    if (it == connections_.end()) {
+        return;
+    }
+    
+    auto* conn = it->second.get();
+    if (conn) {
+        // Clear peer pointer
+        if (conn->peer()) {
+            conn->peer()->set_peer(nullptr);
+        }
+        
+        // Mark as closed
+        conn->set_state(net::ConnectionState::CLOSED);
+        
+        // Clean up backend tracking
+        auto backend_it = backend_connections_.find(backend_fd);
+        if (backend_it != backend_connections_.end()) {
+            if (auto backend_node = backend_it->second.lock()) {
+                backend_node->decrement_connections();
+            }
+            backend_connections_.erase(backend_it);
+        }
+        
+        // Clean up tracking maps
+        connection_times_.erase(backend_fd);
+        backpressure_start_times_.erase(backend_fd);
+        backend_to_client_map_.erase(backend_fd);
+        
+        // Remove from reactor
+        reactor_->del_fd(backend_fd);
+        
+        // Close socket
+        conn->close();
+    }
+    
+    // Remove from connections map
+    connections_.erase(it);
+}
+
+void LoadBalancer::retry_with_next_backend(std::unique_ptr<net::Connection> client_conn, int retry_count) {
+    // Check retry limit
+    if (retry_count >= MAX_RETRY_ATTEMPTS) {
+        // Max retries exceeded - reject client
+        client_conn->close();
+        return;
+    }
+    
+    // Increment retry count
+    retry_count++;
+    
+    // Try connecting to next backend
+    connect_to_backend_with_retry(std::move(client_conn), retry_count);
 }
 
 } // namespace lb::core
