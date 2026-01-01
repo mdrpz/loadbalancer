@@ -16,12 +16,14 @@ public:
     void decrement_connections_active();
     void increment_backend_routed(const std::string& backend);
     void increment_backend_failures(const std::string& backend);
+    void increment_backend_routes_failed();
     void increment_overload_drops();
 
     uint64_t get_connections_total() const;
     uint64_t get_connections_active() const;
     uint64_t get_backend_routed(const std::string& backend) const;
     uint64_t get_backend_failures(const std::string& backend) const;
+    uint64_t get_backend_routes_failed() const;
     uint64_t get_overload_drops() const;
 
     // Export as Prometheus format
@@ -33,6 +35,7 @@ private:
 
     std::atomic<uint64_t> connections_total_{0};
     std::atomic<uint64_t> connections_active_{0};
+    std::atomic<uint64_t> backend_routes_failed_{0};
     std::atomic<uint64_t> overload_drops_{0};
     
     // Per-backend metrics

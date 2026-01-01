@@ -1,4 +1,5 @@
 #include "core/backend_connector.h"
+#include "metrics/metrics.h"
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <netinet/in.h>
@@ -6,6 +7,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <chrono>
+#include <sstream>
 
 namespace lb::core {
 
@@ -39,6 +41,7 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     auto backend_node = backend_pool_.select_backend(max_connections_per_backend_);
     if (!backend_node) {
         // No healthy backends available (all at limit or unhealthy)
+        lb::metrics::Metrics::instance().increment_backend_routes_failed();
         client_conn->close();
         return;
     }
@@ -66,6 +69,9 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     if (inet_pton(AF_INET, backend_node->host().c_str(), &addr.sin_addr) <= 0) {
         // Invalid IP address
         backend_node->increment_failures();
+        std::ostringstream backend_str;
+        backend_str << backend_node->host() << ":" << backend_node->port();
+        lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
         client_conn->close();
         ::close(backend_fd);
         return;
@@ -79,6 +85,9 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     if (result < 0 && errno != EINPROGRESS) {
         // Connection failed immediately - retry with next backend
         backend_node->increment_failures();
+        std::ostringstream backend_str;
+        backend_str << backend_node->host() << ":" << backend_node->port();
+        lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
         backend_conn->close();
         ::close(backend_fd);
         
@@ -91,12 +100,19 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     client_conn->set_peer(backend_conn.get());
     backend_conn->set_peer(client_conn.get());
 
+    std::ostringstream backend_str;
+    backend_str << backend_node->host() << ":" << backend_node->port();
+    std::string backend_key = backend_str.str();
+    
     if (result == 0) {
         // Connected immediately
         backend_conn->set_state(net::ConnectionState::ESTABLISHED);
         backend_node->increment_connections();
+        // Metrics: backend routed and connection active
+        lb::metrics::Metrics::instance().increment_backend_routed(backend_key);
+        lb::metrics::Metrics::instance().increment_connections_active();
     } else {
-        // Connection in progress
+        // Connection in progress - will be tracked when connection completes
         backend_conn->set_state(net::ConnectionState::CONNECTING);
     }
 

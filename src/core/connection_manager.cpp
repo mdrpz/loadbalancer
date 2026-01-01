@@ -1,4 +1,5 @@
 #include "core/connection_manager.h"
+#include "metrics/metrics.h"
 
 namespace lb::core {
 
@@ -72,6 +73,9 @@ void ConnectionManager::close_connection(int fd) {
     // Mark as closed before cleanup to prevent races
     conn->set_state(net::ConnectionState::CLOSED);
     
+    // Check if this is a client connection (not a backend connection)
+    bool is_client_connection = (backend_connections_.find(fd) == backend_connections_.end());
+    
     // If this is a backend connection, decrement connection count
     auto backend_it = backend_connections_.find(fd);
     if (backend_it != backend_connections_.end()) {
@@ -79,6 +83,12 @@ void ConnectionManager::close_connection(int fd) {
             backend_node->decrement_connections();
         }
         backend_connections_.erase(backend_it);
+    }
+    
+    // Metrics: decrement active connections if this was a client connection
+    // (client connections represent the connection pair)
+    if (is_client_connection) {
+        lb::metrics::Metrics::instance().decrement_connections_active();
     }
     
     // Clean up connection time tracking

@@ -31,6 +31,10 @@ void Metrics::increment_backend_failures(const std::string& backend) {
     backend_failures_[backend]++;
 }
 
+void Metrics::increment_backend_routes_failed() {
+    backend_routes_failed_++;
+}
+
 void Metrics::increment_overload_drops() {
     overload_drops_++;
 }
@@ -55,6 +59,10 @@ uint64_t Metrics::get_backend_failures(const std::string& backend) const {
     return (it != backend_failures_.end()) ? it->second.load() : 0;
 }
 
+uint64_t Metrics::get_backend_routes_failed() const {
+    return backend_routes_failed_.load();
+}
+
 uint64_t Metrics::get_overload_drops() const {
     return overload_drops_.load();
 }
@@ -69,6 +77,10 @@ std::string Metrics::export_prometheus() const {
     oss << "# HELP lb_connections_active Current number of active connections\n";
     oss << "# TYPE lb_connections_active gauge\n";
     oss << "lb_connections_active " << get_connections_active() << "\n";
+    
+    oss << "# HELP lb_backend_routes_failed_total Total number of connections that failed to route to any backend\n";
+    oss << "# TYPE lb_backend_routes_failed_total counter\n";
+    oss << "lb_backend_routes_failed_total " << get_backend_routes_failed() << "\n";
     
     oss << "# HELP lb_overload_drops Total number of connections dropped due to overload\n";
     oss << "# TYPE lb_overload_drops counter\n";

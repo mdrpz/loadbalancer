@@ -12,6 +12,7 @@
 #include "core/load_balancer.h"
 #include "core/backend_node.h"
 #include "health/health_checker.h"
+#include "metrics/metrics.h"
 
 namespace lb::core {
 
@@ -154,9 +155,13 @@ void LoadBalancer::handle_accept() {
         size_t established_count = connection_manager_->count_established_connections();
         if (established_count >= max_global_connections_) {
             // Reject connection - close immediately
+            lb::metrics::Metrics::instance().increment_overload_drops();
             ::close(client_fd);
             continue;
         }
+
+        // Increment total connections metric
+        lb::metrics::Metrics::instance().increment_connections_total();
 
         // Create client connection
         auto client_conn = std::make_unique<net::Connection>(client_fd);

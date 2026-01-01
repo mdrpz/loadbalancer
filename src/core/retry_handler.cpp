@@ -1,4 +1,5 @@
 #include "core/retry_handler.h"
+#include "metrics/metrics.h"
 
 namespace lb::core {
 
@@ -10,6 +11,7 @@ void RetryHandler::retry(std::unique_ptr<net::Connection> client_conn, int retry
     // Check retry limit
     if (retry_count >= MAX_RETRY_ATTEMPTS) {
         // Max retries exceeded - reject client
+        lb::metrics::Metrics::instance().increment_backend_routes_failed();
         client_conn->close();
         return;
     }

@@ -1,8 +1,10 @@
 #include "core/event_handlers.h"
+#include "metrics/metrics.h"
 #include <sys/socket.h>
 #include <sys/epoll.h>
 #include <unistd.h>
 #include <chrono>
+#include <sstream>
 
 namespace lb::core {
 
@@ -177,6 +179,10 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             if (backend_it != backend_connections_.end()) {
                 if (auto backend_node = backend_it->second.lock()) {
                     backend_node->increment_failures();
+                    // Metrics: backend failure
+                    std::ostringstream backend_str;
+                    backend_str << backend_node->host() << ":" << backend_node->port();
+                    lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
                 }
             }
             
@@ -202,6 +208,10 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
                 if (backend_it != backend_connections_.end()) {
                     if (auto backend_node = backend_it->second.lock()) {
                         backend_node->increment_failures();
+                        // Metrics: backend failure
+                        std::ostringstream backend_str;
+                        backend_str << backend_node->host() << ":" << backend_node->port();
+                        lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
                     }
                 }
                 
@@ -226,6 +236,11 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             if (backend_it != backend_connections_.end()) {
                 if (auto backend_node = backend_it->second.lock()) {
                     backend_node->increment_connections();
+                    // Metrics: backend routed and connection active
+                    std::ostringstream backend_str;
+                    backend_str << backend_node->host() << ":" << backend_node->port();
+                    lb::metrics::Metrics::instance().increment_backend_routed(backend_str.str());
+                    lb::metrics::Metrics::instance().increment_connections_active();
                 }
             }
             
@@ -245,6 +260,10 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             if (backend_it != backend_connections_.end()) {
                 if (auto backend_node = backend_it->second.lock()) {
                     backend_node->increment_failures();
+                    // Metrics: backend failure
+                    std::ostringstream backend_str;
+                    backend_str << backend_node->host() << ":" << backend_node->port();
+                    lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
                 }
             }
             

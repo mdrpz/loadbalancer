@@ -2,7 +2,9 @@
 #include <csignal>
 #include <atomic>
 #include <thread>
+#include <memory>
 #include "core/load_balancer.h"
+#include "metrics/metrics_server.h"
 
 namespace {
     std::atomic<bool> g_shutdown{false};
@@ -36,6 +38,11 @@ int main(int argc, char* argv[]) {
     // Create and initialize load balancer
     lb::core::LoadBalancer lb;
     g_lb = &lb;
+    
+    // Start metrics server (default port 9090)
+    std::unique_ptr<lb::metrics::MetricsServer> metrics_server = 
+        std::make_unique<lb::metrics::MetricsServer>(9090);
+    metrics_server->start();
 
     // Add some default backends (for Phase 1 testing)
     // In Phase 3, these will come from config file
