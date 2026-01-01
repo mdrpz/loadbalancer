@@ -1,13 +1,23 @@
 #include "config/config.h"
+#ifdef HAVE_YAML_CPP
+#include <yaml-cpp/yaml.h>
+#endif
+#include <fstream>
+#include <stdexcept>
+#include <sys/stat.h>
+#include <ctime>
+#include <iostream>
 
 namespace lb::config {
 
-ConfigManager::ConfigManager() {
+ConfigManager::ConfigManager() 
+    : last_modified_time_(0), yaml_cpp_warning_shown_(false) {
     // Initialize with defaults
     config_ = std::make_shared<Config>();
     config_->listen_host = "0.0.0.0";
     config_->listen_port = 8080;
     config_->tls_enabled = false;
+    config_->routing_algorithm = "round_robin";
     config_->max_connections_per_backend = 100;
     config_->max_global_connections = 1000;
     config_->health_check_interval_ms = 5000;
@@ -27,9 +37,159 @@ ConfigManager::ConfigManager() {
 ConfigManager::~ConfigManager() = default;
 
 bool ConfigManager::load_from_file(const std::string& path) {
-    // TODO: Implement YAML parsing (Phase 3)
-    config_path_ = path;
-    return false; // Not implemented yet
+#ifdef HAVE_YAML_CPP
+    try {
+        YAML::Node config = YAML::LoadFile(path);
+        
+        // Create new config
+        auto new_config = std::make_shared<Config>();
+        
+        // Listener
+        if (config["listener"]) {
+            const auto& listener = config["listener"];
+            if (listener["host"]) {
+                new_config->listen_host = listener["host"].as<std::string>();
+            }
+            if (listener["port"]) {
+                new_config->listen_port = listener["port"].as<uint16_t>();
+            }
+            if (listener["tls_enabled"]) {
+                new_config->tls_enabled = listener["tls_enabled"].as<bool>();
+            }
+            if (listener["tls_cert"]) {
+                new_config->tls_cert_path = listener["tls_cert"].as<std::string>();
+            }
+            if (listener["tls_key"]) {
+                new_config->tls_key_path = listener["tls_key"].as<std::string>();
+            }
+        }
+        
+        // Backends
+        if (config["backends"] && config["backends"].IsSequence()) {
+            for (const auto& backend : config["backends"]) {
+                BackendConfig backend_cfg;
+                if (backend["host"]) {
+                    backend_cfg.host = backend["host"].as<std::string>();
+                }
+                if (backend["port"]) {
+                    backend_cfg.port = backend["port"].as<uint16_t>();
+                }
+                new_config->backends.push_back(backend_cfg);
+            }
+        }
+        
+        // Routing
+        if (config["routing"]) {
+            const auto& routing = config["routing"];
+            if (routing["algorithm"]) {
+                new_config->routing_algorithm = routing["algorithm"].as<std::string>();
+            }
+            if (routing["max_connections_per_backend"]) {
+                new_config->max_connections_per_backend = routing["max_connections_per_backend"].as<uint32_t>();
+            }
+            if (routing["max_global_connections"]) {
+                new_config->max_global_connections = routing["max_global_connections"].as<uint32_t>();
+            }
+        }
+        
+        // Health check
+        if (config["health_check"]) {
+            const auto& health = config["health_check"];
+            if (health["interval_ms"]) {
+                new_config->health_check_interval_ms = health["interval_ms"].as<uint32_t>();
+            }
+            if (health["timeout_ms"]) {
+                new_config->health_check_timeout_ms = health["timeout_ms"].as<uint32_t>();
+            }
+            if (health["failure_threshold"]) {
+                new_config->health_check_failure_threshold = health["failure_threshold"].as<uint32_t>();
+            }
+            if (health["success_threshold"]) {
+                new_config->health_check_success_threshold = health["success_threshold"].as<uint32_t>();
+            }
+            if (health["type"]) {
+                new_config->health_check_type = health["type"].as<std::string>();
+            }
+        }
+        
+        // Thread pool
+        if (config["thread_pool"]) {
+            const auto& thread_pool = config["thread_pool"];
+            if (thread_pool["worker_count"]) {
+                new_config->thread_pool_worker_count = thread_pool["worker_count"].as<uint32_t>();
+            }
+        }
+        
+        // Metrics
+        if (config["metrics"]) {
+            const auto& metrics = config["metrics"];
+            if (metrics["enabled"]) {
+                new_config->metrics_enabled = metrics["enabled"].as<bool>();
+            }
+            if (metrics["port"]) {
+                new_config->metrics_port = metrics["port"].as<uint16_t>();
+            }
+        }
+        
+        // Logging
+        if (config["logging"]) {
+            const auto& logging = config["logging"];
+            if (logging["level"]) {
+                new_config->log_level = logging["level"].as<std::string>();
+            }
+            if (logging["file"]) {
+                new_config->log_file = logging["file"].as<std::string>();
+            }
+        }
+        
+        // Memory
+        if (config["memory"]) {
+            const auto& memory = config["memory"];
+            if (memory["global_buffer_budget_mb"]) {
+                new_config->global_buffer_budget_mb = memory["global_buffer_budget_mb"].as<uint32_t>();
+            }
+        }
+        
+        // Backpressure
+        if (config["backpressure"]) {
+            const auto& backpressure = config["backpressure"];
+            if (backpressure["timeout_ms"]) {
+                new_config->backpressure_timeout_ms = backpressure["timeout_ms"].as<uint32_t>();
+            }
+        }
+        
+        // Graceful shutdown
+        if (config["graceful_shutdown"]) {
+            const auto& shutdown = config["graceful_shutdown"];
+            if (shutdown["timeout_seconds"]) {
+                new_config->graceful_shutdown_timeout_seconds = shutdown["timeout_seconds"].as<uint32_t>();
+            }
+        }
+        
+        // Atomic swap - replace old config with new one
+        config_ = new_config;
+        config_path_ = path;
+        last_modified_time_ = get_file_mtime(path);
+        return true;
+    } catch (const YAML::Exception& e) {
+        // YAML parsing error
+        std::cerr << "YAML parsing error in " << path << ": " << e.what() << std::endl;
+        return false;
+    } catch (const std::exception& e) {
+        // Other errors (file not found, etc.)
+        std::cerr << "Error loading config from " << path << ": " << e.what() << std::endl;
+        return false;
+    }
+#else
+    // yaml-cpp not available - can't parse config files
+    // Only warn once to avoid spam
+    if (!yaml_cpp_warning_shown_) {
+        std::cerr << "Warning: yaml-cpp not available. Install libyaml-cpp-dev and rebuild to enable config file support." << std::endl;
+        yaml_cpp_warning_shown_ = true;
+    }
+    (void)path;
+    return false;
+#endif
 }
 
 std::shared_ptr<const Config> ConfigManager::get_config() const {
@@ -37,11 +197,50 @@ std::shared_ptr<const Config> ConfigManager::get_config() const {
 }
 
 void ConfigManager::start_reload_watcher() {
-    // TODO: Implement config file watching (Phase 3)
+    // For now, we'll use polling-based reload
+    // In a production system, you might use inotify on Linux
+    // This is a simple implementation that can be called periodically
+    if (!config_path_.empty()) {
+        last_modified_time_ = get_file_mtime(config_path_);
+    }
 }
 
 void ConfigManager::stop_reload_watcher() {
-    // TODO: Implement config file watching (Phase 3)
+    // Nothing to stop for polling-based approach
+}
+
+bool ConfigManager::check_and_reload() {
+    if (config_path_.empty()) {
+        return false;
+    }
+    
+#ifndef HAVE_YAML_CPP
+    // Don't try to reload if yaml-cpp is not available (avoid spam)
+    return false;
+#endif
+    
+    std::time_t current_mtime = get_file_mtime(config_path_);
+    if (current_mtime > last_modified_time_) {
+        // File has been modified, reload it
+        return load_from_file(config_path_);
+    }
+    
+    return false;
+}
+
+std::time_t ConfigManager::get_file_mtime(const std::string& path) const {
+    std::ifstream file(path);
+    if (!file.good()) {
+        return 0;
+    }
+    file.close();
+    
+    // Use stat to get modification time
+    struct stat file_stat;
+    if (stat(path.c_str(), &file_stat) == 0) {
+        return file_stat.st_mtime;
+    }
+    return 0;
 }
 
 } // namespace lb::config

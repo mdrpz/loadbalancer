@@ -14,7 +14,14 @@
 #include "core/retry_handler.h"
 #include <memory>
 #include <unordered_map>
+#include <set>
 #include <chrono>
+
+// Forward declaration
+namespace lb::config {
+    struct Config;
+    class ConfigManager;
+}
 
 namespace lb::core {
 
@@ -24,15 +31,25 @@ public:
     ~LoadBalancer();
 
     bool initialize(const std::string& listen_host, uint16_t listen_port);
+    bool initialize_from_config(std::shared_ptr<const lb::config::Config> config);
     void run();
     void stop();
+    
+    // Set config manager for hot reload
+    void set_config_manager(lb::config::ConfigManager* config_manager);
 
     // Add backend for routing
     void add_backend(const std::string& host, uint16_t port);
+    
+    // Apply config changes (for hot reload)
+    void apply_config(std::shared_ptr<const lb::config::Config> config);
 
 private:
     // Connection management
     void handle_accept();
+    
+    // Backend management
+    void cleanup_drained_backends();
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -74,6 +91,9 @@ private:
     std::unique_ptr<DataForwarder> data_forwarder_;
     std::unique_ptr<BackpressureManager> backpressure_manager_;
     std::unique_ptr<RetryHandler> retry_handler_;
+    
+    // Config hot reload
+    lb::config::ConfigManager* config_manager_;
 };
 
 } // namespace lb::core

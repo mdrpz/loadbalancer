@@ -27,6 +27,12 @@ public:
     RoutingAlgorithm algorithm() const { return algorithm_; }
     
     size_t size() const { return backends_.size(); }
+    
+    // Get all backends (for config reload tracking)
+    std::vector<std::shared_ptr<BackendNode>> get_all_backends() const { return backends_; }
+    
+    // Find backend by host:port
+    std::shared_ptr<BackendNode> find_backend(const std::string& host, uint16_t port) const;
 
 private:
     std::vector<std::shared_ptr<BackendNode>> backends_;

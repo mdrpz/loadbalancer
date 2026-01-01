@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 #include <memory>
+#include <ctime>
 
 namespace lb::config {
 
@@ -67,10 +68,17 @@ public:
     // Hot reload support (Phase 3)
     void start_reload_watcher();
     void stop_reload_watcher();
+    
+    // Check if config file has changed (for polling-based reload)
+    bool check_and_reload();
 
 private:
     std::shared_ptr<Config> config_;
     std::string config_path_;
+    std::time_t last_modified_time_;
+    bool yaml_cpp_warning_shown_; 
+    
+    std::time_t get_file_mtime(const std::string& path) const;
 };
 
 } // namespace lb::config

@@ -58,5 +58,14 @@ std::shared_ptr<BackendNode> BackendPool::select_backend(uint32_t max_connection
     return nullptr;
 }
 
+std::shared_ptr<BackendNode> BackendPool::find_backend(const std::string& host, uint16_t port) const {
+    for (const auto& backend : backends_) {
+        if (backend->host() == host && backend->port() == port) {
+            return backend;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace lb::core
 

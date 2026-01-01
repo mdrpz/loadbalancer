@@ -4,10 +4,13 @@
 #include <errno.h>
 #include <unordered_map>
 #include <stdexcept>
+#include <chrono>
 
 namespace lb::net {
 
-EpollReactor::EpollReactor() : running_(false) {
+EpollReactor::EpollReactor() 
+    : running_(false), periodic_interval_ms_(0),
+      last_periodic_check_(std::chrono::steady_clock::now()) {
     epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
     if (epoll_fd_ < 0) {
         throw std::runtime_error("Failed to create epoll instance");
@@ -50,12 +53,34 @@ bool EpollReactor::del_fd(int fd) {
     return result;
 }
 
+void EpollReactor::set_periodic_callback(std::function<void()> callback, uint32_t interval_ms) {
+    periodic_callback_ = std::move(callback);
+    periodic_interval_ms_ = interval_ms;
+    last_periodic_check_ = std::chrono::steady_clock::now();
+}
+
 void EpollReactor::run() {
     running_ = true;
     epoll_event events[MAX_EVENTS];
+    
+    // Calculate timeout for epoll_wait (use periodic interval or 1 second default)
+    int timeout_ms = periodic_interval_ms_ > 0 ? static_cast<int>(periodic_interval_ms_) : 1000;
 
     while (running_) {
-        int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
+        int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, timeout_ms);
+        
+        // Check for periodic callback
+        if (periodic_callback_ && periodic_interval_ms_ > 0) {
+            auto now = std::chrono::steady_clock::now();
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now - last_periodic_check_).count();
+            
+            if (elapsed >= static_cast<int64_t>(periodic_interval_ms_)) {
+                periodic_callback_();
+                last_periodic_check_ = now;
+            }
+        }
+        
         if (nfds < 0) {
             if (errno == EINTR) {
                 continue;
