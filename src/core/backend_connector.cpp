@@ -57,7 +57,7 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     int opt = 1;
     if (setsockopt(backend_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         // Failed to set socket option, but continue anyway (non-critical)
-        // Could log warning here in Phase 2
+        std::cerr << "Failed to set socket option: " << strerror(errno) << std::endl;
     }
 
     // Connect to backend

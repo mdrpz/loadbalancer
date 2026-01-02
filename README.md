@@ -20,7 +20,20 @@ A production-grade TCP load balancer built in C++20 using epoll for high-perform
 - C++20 compatible compiler (GCC 10+, Clang 12+)
 - OpenSSL development libraries
 - Linux (or WSL)
-- yaml-cpp (optional, for config file support)
+- yaml-cpp (for config file support)
+
+**Install yaml-cpp:**
+
+On Debian/Ubuntu (WSL):
+```bash
+sudo apt-get update
+sudo apt-get install libyaml-cpp-dev
+```
+
+On Fedora/RHEL:
+```bash
+sudo dnf install yaml-cpp-devel
+```
 
 ### Build Steps
 
@@ -29,6 +42,18 @@ mkdir build
 cd build
 cmake ..
 cmake --build .
+```
+
+**Note:** If you install yaml-cpp after running `cmake ..`, you need to reconfigure:
+```bash
+cmake ..
+cmake --build .
+```
+
+Verify yaml-cpp is detected:
+```bash
+cmake .. 2>&1 | grep -i yaml
+# Should show: -- Found yaml-cpp: ...
 ```
 
 ### Build Options
@@ -88,11 +113,19 @@ Examples:
 
 ### Using Config File
 
+From the `build` directory:
 ```bash
-./lb config.yaml
+./lb ../config.yaml
+```
+
+Or from the project root:
+```bash
+./build/lb config.yaml
 ```
 
 The config file is automatically reloaded every 5 seconds if modified. Changes to backends will mark removed backends as DRAINING (existing connections continue, no new connections routed).
+
+**Note:** If you see "yaml-cpp not available", install `libyaml-cpp-dev` and rebuild (see Prerequisites above).
 
 ### Using Command-Line
 
@@ -113,7 +146,7 @@ The config file is automatically reloaded every 5 seconds if modified. Changes t
 2. Start the load balancer:
    ```bash
    cd build
-   ./lb config.yaml
+   ./lb ../config.yaml
    # or: ./lb 8080 0.0.0.0 127.0.0.1:8000
    ```
 
