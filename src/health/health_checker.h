@@ -1,12 +1,12 @@
 #pragma once
 
-#include "core/backend_node.h"
-#include <memory>
-#include <vector>
-#include <thread>
 #include <atomic>
+#include <memory>
 #include <mutex>
+#include <thread>
 #include <unordered_map>
+#include <vector>
+#include "core/backend_node.h"
 
 namespace lb::health {
 
@@ -15,16 +15,16 @@ public:
     HealthChecker();
     ~HealthChecker();
 
-    void add_backend(std::shared_ptr<lb::core::BackendNode> backend);
-    void remove_backend(std::shared_ptr<lb::core::BackendNode> backend);
-    
+    void add_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
+    void remove_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
+
     void start();
     void stop();
 
 private:
     void run_loop();
-    bool check_backend(std::shared_ptr<lb::core::BackendNode> backend);
-    void update_backend_state(std::shared_ptr<lb::core::BackendNode> backend, bool healthy);
+    bool check_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
+    void update_backend_state(const std::shared_ptr<lb::core::BackendNode>& backend, bool healthy);
 
     std::vector<std::shared_ptr<lb::core::BackendNode>> backends_;
     std::mutex backends_mutex_;
@@ -34,7 +34,7 @@ private:
     uint32_t timeout_ms_;
     uint32_t failure_threshold_;
     uint32_t success_threshold_;
-    
+
     // Track consecutive failures/successes per backend
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_failures_;
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_successes_;
@@ -42,4 +42,3 @@ private:
 };
 
 } // namespace lb::health
-

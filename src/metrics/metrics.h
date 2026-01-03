@@ -1,8 +1,8 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <string>
-#include <atomic>
 #include <unordered_map>
 
 namespace lb::metrics {
@@ -37,7 +37,7 @@ private:
     std::atomic<uint64_t> connections_active_{0};
     std::atomic<uint64_t> backend_routes_failed_{0};
     std::atomic<uint64_t> overload_drops_{0};
-    
+
     // Per-backend metrics
     mutable std::mutex backend_metrics_mutex_;
     std::unordered_map<std::string, std::atomic<uint64_t>> backend_routed_;
@@ -45,4 +45,3 @@ private:
 };
 
 } // namespace lb::metrics
-

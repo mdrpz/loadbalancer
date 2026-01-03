@@ -1,15 +1,15 @@
 #pragma once
 
-#include "net/connection.h"
-#include <memory>
 #include <functional>
+#include <memory>
+#include "net/connection.h"
 
 namespace lb::core {
 
 class RetryHandler {
 public:
     RetryHandler(std::function<void(std::unique_ptr<net::Connection>, int)> connect_callback);
-    
+
     void retry(std::unique_ptr<net::Connection> client_conn, int retry_count);
 
 private:
@@ -18,4 +18,3 @@ private:
 };
 
 } // namespace lb::core
-

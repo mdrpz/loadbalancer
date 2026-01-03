@@ -1,6 +1,6 @@
 #include "tls/tls_context.h"
-#include <openssl/ssl.h>
 #include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <stdexcept>
 
 namespace lb::tls {
@@ -10,9 +10,8 @@ TlsContext::TlsContext() : ctx_(nullptr) {
 }
 
 TlsContext::~TlsContext() {
-    if (ctx_) {
+    if (ctx_)
         SSL_CTX_free(ctx_);
-    }
 }
 
 bool TlsContext::load_certificate(const std::string& cert_path, const std::string& key_path) {
@@ -29,10 +28,8 @@ SSL* TlsContext::create_ssl(int fd) {
 }
 
 void TlsContext::destroy_ssl(SSL* ssl) {
-    if (ssl) {
+    if (ssl)
         SSL_free(ssl);
-    }
 }
 
 } // namespace lb::tls
-

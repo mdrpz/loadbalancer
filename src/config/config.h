@@ -1,10 +1,10 @@
 #pragma once
 
-#include <string>
 #include <cstdint>
-#include <vector>
-#include <memory>
 #include <ctime>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace lb::config {
 
@@ -63,12 +63,12 @@ public:
     ~ConfigManager();
 
     bool load_from_file(const std::string& path);
-    std::shared_ptr<const Config> get_config() const;
+    [[nodiscard]] std::shared_ptr<const Config> get_config() const;
 
     // Hot reload support (Phase 3)
     void start_reload_watcher();
     void stop_reload_watcher();
-    
+
     // Check if config file has changed (for polling-based reload)
     bool check_and_reload();
 
@@ -76,10 +76,9 @@ private:
     std::shared_ptr<Config> config_;
     std::string config_path_;
     std::time_t last_modified_time_;
-    bool yaml_cpp_warning_shown_; 
-    
-    std::time_t get_file_mtime(const std::string& path) const;
+    bool yaml_cpp_warning_shown_;
+
+    static [[nodiscard]] std::time_t get_file_mtime(const std::string& path);
 };
 
 } // namespace lb::config
-

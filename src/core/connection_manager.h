@@ -1,12 +1,12 @@
 #pragma once
 
-#include "net/connection.h"
-#include "net/epoll_reactor.h"
-#include "core/backend_node.h"
-#include <unordered_map>
-#include <memory>
 #include <chrono>
 #include <functional>
+#include <memory>
+#include <unordered_map>
+#include "core/backend_node.h"
+#include "net/connection.h"
+#include "net/epoll_reactor.h"
 
 namespace lb::core {
 
@@ -18,12 +18,11 @@ public:
         std::unordered_map<int, std::chrono::steady_clock::time_point>& connection_times,
         std::unordered_map<int, std::chrono::steady_clock::time_point>& backpressure_times,
         std::unordered_map<int, int>& client_retry_counts,
-        std::unordered_map<int, int>& backend_to_client_map,
-        net::EpollReactor& reactor);
-    
+        std::unordered_map<int, int>& backend_to_client_map, net::EpollReactor& reactor);
+
     net::Connection* get_connection(int fd);
-    size_t count_established_connections() const;
-    
+    [[nodiscard]] size_t count_established_connections() const;
+
     void close_connection(int fd);
     void close_backend_connection_only(int backend_fd);
 
@@ -38,4 +37,3 @@ private:
 };
 
 } // namespace lb::core
-

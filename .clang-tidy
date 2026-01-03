@@ -1,0 +1,19 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  readability-*,
+  modernize-*,
+  -readability-magic-numbers,
+  -modernize-use-trailing-return-type,
+  -readability-identifier-length,
+  -readability-function-cognitive-complexity,
+  -readability-braces-around-statements,
+  -modernize-deprecated-headers,
+  -readability-implicit-bool-conversion
+WarningsAsErrors: ''
+HeaderFilterRegex: '^src/.*|^tests/.*|^bench/.*'
+AnalyzeTemporaryDtors: false
+FormatStyle: 'file'
+UseColor: true

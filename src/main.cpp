@@ -1,83 +1,68 @@
-#include <iostream>
-#include <csignal>
 #include <atomic>
-#include <thread>
+#include <csignal>
+#include <iostream>
 #include <memory>
+#include <thread>
+#include "config/config.h"
 #include "core/load_balancer.h"
 #include "metrics/metrics_server.h"
-#include "config/config.h"
 
 namespace {
-    std::atomic<bool> g_shutdown{false};
-    lb::core::LoadBalancer* g_lb = nullptr;
+std::atomic<bool> g_shutdown{false};
+lb::core::LoadBalancer* g_lb = nullptr;
 
-    void signal_handler(int sig) {
-        (void)sig;
-        g_shutdown.store(true);
-        if (g_lb) {
-            g_lb->stop();
-        }
-    }
+void signal_handler(int sig) {
+    (void)sig;
+    g_shutdown.store(true);
+    if (g_lb)
+        g_lb->stop();
 }
+} // namespace
 
 int main(int argc, char* argv[]) {
-    // Register signal handlers
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    // Create config manager
     lb::config::ConfigManager config_manager;
     std::string config_path;
-    
-    // Check if config file is provided
+
     bool config_loaded = false;
     if (argc >= 2) {
         config_path = argv[1];
         config_loaded = config_manager.load_from_file(config_path);
         if (!config_loaded) {
-            #ifndef HAVE_YAML_CPP
-            // Error already printed by load_from_file (only once)
-            #else
+#ifndef HAVE_YAML_CPP
+#else
             std::cerr << "Failed to load config from: " << config_path << "\n";
-            #endif
+#endif
             std::cerr << "Using command-line arguments or defaults\n";
         } else {
             std::cout << "Loaded config from: " << config_path << "\n";
             config_manager.start_reload_watcher();
         }
     }
-    
-    // Get config (either from file or defaults)
+
     auto config = config_manager.get_config();
-    
-    // Create and initialize load balancer
+
     lb::core::LoadBalancer lb;
     g_lb = &lb;
-    
-    // Set config manager for hot reload (only if config file was provided)
-    if (!config_path.empty()) {
+
+    if (!config_path.empty())
         lb.set_config_manager(&config_manager);
-    }
-    
-    // Initialize from config if available, otherwise use command-line args
+
     bool initialized = false;
     if (config_loaded && config) {
         initialized = lb.initialize_from_config(config);
     } else {
-        // Fallback to command-line arguments (backward compatibility)
         std::string listen_host = "0.0.0.0";
         uint16_t listen_port = 8080;
-        
+
         if (argc >= 2 && !config_path.empty()) {
-            // First arg was config file, try next args
-            if (argc >= 3) {
+            if (argc >= 3)
                 listen_port = static_cast<uint16_t>(std::stoi(argv[2]));
-            }
-            if (argc >= 4) {
+            if (argc >= 4)
                 listen_host = argv[3];
-            }
             if (argc >= 5) {
-                // Parse backends from command line
                 std::string backends_str = argv[4];
                 size_t pos = 0;
                 while ((pos = backends_str.find(',')) != std::string::npos) {
@@ -93,18 +78,16 @@ int main(int argc, char* argv[]) {
                 size_t colon = backends_str.find(':');
                 if (colon != std::string::npos) {
                     std::string host = backends_str.substr(0, colon);
-                    uint16_t port = static_cast<uint16_t>(std::stoi(backends_str.substr(colon + 1)));
+                    uint16_t port =
+                        static_cast<uint16_t>(std::stoi(backends_str.substr(colon + 1)));
                     lb.add_backend(host, port);
                 }
             }
         } else {
-            // Old-style command line (no config file)
-            if (argc >= 2) {
+            if (argc >= 2)
                 listen_port = static_cast<uint16_t>(std::stoi(argv[1]));
-            }
-            if (argc >= 3) {
+            if (argc >= 3)
                 listen_host = argv[2];
-            }
             if (argc >= 4) {
                 std::string backends_str = argv[3];
                 size_t pos = 0;
@@ -121,26 +104,26 @@ int main(int argc, char* argv[]) {
                 size_t colon = backends_str.find(':');
                 if (colon != std::string::npos) {
                     std::string host = backends_str.substr(0, colon);
-                    uint16_t port = static_cast<uint16_t>(std::stoi(backends_str.substr(colon + 1)));
+                    uint16_t port =
+                        static_cast<uint16_t>(std::stoi(backends_str.substr(colon + 1)));
                     lb.add_backend(host, port);
                 }
             }
         }
-        
+
         initialized = lb.initialize(listen_host, listen_port);
-        
+
         if (!initialized) {
             std::cerr << "Failed to initialize load balancer\n";
             return 1;
         }
     }
-    
+
     if (!initialized) {
         std::cerr << "Failed to initialize load balancer\n";
         return 1;
     }
-    
-    // Start metrics server
+
     uint16_t metrics_port = config ? config->metrics_port : 9090;
     bool metrics_enabled = config ? config->metrics_enabled : true;
     std::unique_ptr<lb::metrics::MetricsServer> metrics_server;
@@ -150,15 +133,12 @@ int main(int argc, char* argv[]) {
         std::cout << "Metrics server listening on port " << metrics_port << "\n";
     }
 
-    std::cout << "Load Balancer listening on " 
-              << (config ? config->listen_host : "0.0.0.0") << ":" 
+    std::cout << "Load Balancer listening on " << (config ? config->listen_host : "0.0.0.0") << ":"
               << (config ? config->listen_port : 8080) << "\n";
     std::cout << "Press Ctrl+C to stop...\n";
 
-    // Run event loop (blocks until stop() is called)
     lb.run();
 
     std::cout << "Load Balancer shutting down...\n";
     return 0;
 }
-

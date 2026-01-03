@@ -1,10 +1,10 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
-#include <thread>
-#include <atomic>
 #include <string>
+#include <thread>
 
 namespace lb::metrics {
 
@@ -19,8 +19,8 @@ public:
 private:
     void run_loop();
     void handle_request(int client_fd);
-    void send_response(int client_fd, const std::string& body, bool is_metrics);
-    
+    static void send_response(int client_fd, const std::string& body, bool is_metrics);
+
     uint16_t port_;
     int listener_fd_;
     std::thread thread_;
@@ -28,4 +28,3 @@ private:
 };
 
 } // namespace lb::metrics
-

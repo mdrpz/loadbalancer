@@ -19,15 +19,18 @@ public:
     TcpListener& operator=(TcpListener&&) noexcept;
 
     bool bind(const std::string& host, uint16_t port);
-    bool listen(int backlog = 128);
-    int accept(); // Returns fd or -1 on error
+    bool listen(int backlog = 128) const;
+    int accept() const; // Returns fd or -1 on error
 
-    int fd() const { return fd_; }
-    bool is_bound() const { return fd_ >= 0; }
+    [[nodiscard]] int fd() const {
+        return fd_;
+    }
+    [[nodiscard]] bool is_bound() const {
+        return fd_ >= 0;
+    }
 
 private:
     int fd_;
 };
 
 } // namespace lb::net
-

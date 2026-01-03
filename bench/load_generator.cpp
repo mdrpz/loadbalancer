@@ -1,12 +1,12 @@
-#include <iostream>
-#include <vector>
-#include <thread>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 #include <chrono>
 #include <cstring>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
+#include <iostream>
+#include <thread>
+#include <vector>
 
 // Simple load generator for benchmarking
 // TODO: Implement full load generator (Phase 4)
@@ -22,11 +22,10 @@ int main(int argc, char* argv[]) {
     int num_connections = (argc > 3) ? std::stoi(argv[3]) : 1000;
     int duration = (argc > 4) ? std::stoi(argv[4]) : 60;
 
-    std::cout << "Load generator: " << num_connections 
-              << " connections for " << duration << " seconds\n";
-    
+    std::cout << "Load generator: " << num_connections << " connections for " << duration
+              << " seconds\n";
+
     // TODO: Implement connection spawning and data sending
-    
+
     return 0;
 }
-

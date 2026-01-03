@@ -6,6 +6,9 @@ cmake-build-*/
 *.so
 *.dylib
 
+# Compilation database
+compile_commands.json
+
 # Executables
 lb
 load_generator

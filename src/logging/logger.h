@@ -1,21 +1,16 @@
 #pragma once
 
-#include <string>
-#include <memory>
-#include <thread>
-#include <queue>
-#include <mutex>
-#include <condition_variable>
 #include <atomic>
+#include <condition_variable>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
 
 namespace lb::logging {
 
-enum class LogLevel {
-    DEBUG,
-    INFO,
-    WARN,
-    ERROR
-};
+enum class LogLevel { DEBUG, INFO, WARN, ERROR };
 
 class Logger {
 public:
@@ -43,7 +38,7 @@ private:
     LogLevel level_;
     std::string log_file_path_;
     FILE* log_file_;
-    
+
     std::queue<std::string> log_queue_;
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
@@ -53,4 +48,3 @@ private:
 };
 
 } // namespace lb::logging
-
