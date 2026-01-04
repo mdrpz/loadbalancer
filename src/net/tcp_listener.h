@@ -19,8 +19,8 @@ public:
     TcpListener& operator=(TcpListener&&) noexcept;
 
     bool bind(const std::string& host, uint16_t port);
-    bool listen(int backlog = 128) const;
-    int accept() const; // Returns fd or -1 on error
+    [[nodiscard]] bool listen(int backlog = 128) const;
+    [[nodiscard]] int accept() const; // Returns fd or -1 on error
 
     [[nodiscard]] int fd() const {
         return fd_;

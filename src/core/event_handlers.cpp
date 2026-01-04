@@ -5,6 +5,7 @@
 #include <chrono>
 #include <sstream>
 #include <utility>
+#include "logging/logger.h"
 #include "metrics/metrics.h"
 
 namespace lb::core {

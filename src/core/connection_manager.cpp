@@ -1,4 +1,5 @@
 #include "core/connection_manager.h"
+#include "logging/logger.h"
 #include "metrics/metrics.h"
 
 namespace lb::core {
@@ -58,15 +59,24 @@ void ConnectionManager::close_connection(int fd) {
     bool is_client_connection = (backend_connections_.find(fd) == backend_connections_.end());
 
     auto backend_it = backend_connections_.find(fd);
+    std::string backend_info;
     if (backend_it != backend_connections_.end()) {
         if (auto backend_node = backend_it->second.lock()) {
             backend_node->decrement_connections();
+            backend_info =
+                " backend=" + backend_node->host() + ":" + std::to_string(backend_node->port());
         }
     }
     backend_connections_.erase(backend_it);
 
-    if (is_client_connection)
+    if (is_client_connection) {
         lb::metrics::Metrics::instance().decrement_connections_active();
+        lb::logging::Logger::instance().debug("Client connection closed (fd=" + std::to_string(fd) +
+                                              ")");
+    } else {
+        lb::logging::Logger::instance().debug(
+            "Backend connection closed (fd=" + std::to_string(fd) + backend_info + ")");
+    }
 
     connection_times_.erase(fd);
 

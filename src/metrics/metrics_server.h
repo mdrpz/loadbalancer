@@ -18,7 +18,7 @@ public:
 
 private:
     void run_loop();
-    void handle_request(int client_fd);
+    static void handle_request(int client_fd);
     static void send_response(int client_fd, const std::string& body, bool is_metrics);
 
     uint16_t port_;

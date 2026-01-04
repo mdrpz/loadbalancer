@@ -2,7 +2,6 @@
 
 #include <utility>
 
-#include <utility>
 #include "metrics/metrics.h"
 
 namespace lb::core {

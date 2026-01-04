@@ -5,6 +5,7 @@
 #include <thread>
 #include "config/config.h"
 #include "core/load_balancer.h"
+#include "logging/logger.h"
 #include "metrics/metrics_server.h"
 
 namespace {
@@ -43,6 +44,23 @@ int main(int argc, char* argv[]) {
     }
 
     auto config = config_manager.get_config();
+
+    auto& logger = lb::logging::Logger::instance();
+    if (config && !config->log_file.empty())
+        logger.set_output_file(config->log_file);
+    if (config) {
+        std::string level = config->log_level;
+        if (level == "debug" || level == "DEBUG")
+            logger.set_level(lb::logging::LogLevel::DEBUG);
+        else if (level == "warn" || level == "WARN")
+            logger.set_level(lb::logging::LogLevel::WARN);
+        else if (level == "error" || level == "ERROR")
+            logger.set_level(lb::logging::LogLevel::ERROR);
+        else
+            logger.set_level(lb::logging::LogLevel::INFO);
+    }
+    logger.start();
+    logger.info("Load balancer starting");
 
     lb::core::LoadBalancer lb;
     g_lb = &lb;
@@ -140,5 +158,7 @@ int main(int argc, char* argv[]) {
     lb.run();
 
     std::cout << "Load Balancer shutting down...\n";
+    logger.info("Load balancer shutting down");
+    logger.stop();
     return 0;
 }

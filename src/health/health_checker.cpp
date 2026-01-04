@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include "logging/logger.h"
 
 namespace lb::health {
 
@@ -134,6 +135,9 @@ void HealthChecker::update_backend_state(const std::shared_ptr<lb::core::Backend
             if (consecutive_successes_[backend] >= success_threshold_) {
                 backend->set_state(lb::core::BackendState::HEALTHY);
                 consecutive_successes_[backend] = 0;
+                lb::logging::Logger::instance().info("Backend " + backend->host() + ":" +
+                                                     std::to_string(backend->port()) +
+                                                     " transitioned to HEALTHY");
             }
         }
     } else {
@@ -144,6 +148,9 @@ void HealthChecker::update_backend_state(const std::shared_ptr<lb::core::Backend
             if (consecutive_failures_[backend] >= failure_threshold_) {
                 backend->set_state(lb::core::BackendState::UNHEALTHY);
                 consecutive_failures_[backend] = 0;
+                lb::logging::Logger::instance().warn("Backend " + backend->host() + ":" +
+                                                     std::to_string(backend->port()) +
+                                                     " transitioned to UNHEALTHY");
             }
         }
     }

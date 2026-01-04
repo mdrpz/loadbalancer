@@ -10,6 +10,7 @@
 #include <iostream>
 #include <sstream>
 #include <utility>
+#include "logging/logger.h"
 #include "metrics/metrics.h"
 
 namespace lb::core {
@@ -36,9 +37,13 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     auto backend_node = backend_pool_.select_backend(max_connections_per_backend_);
     if (!backend_node) {
         lb::metrics::Metrics::instance().increment_backend_routes_failed();
+        lb::logging::Logger::instance().warn("No healthy backend available for routing");
         client_conn->close();
         return;
     }
+
+    lb::logging::Logger::instance().debug("Routing connection to backend " + backend_node->host() +
+                                          ":" + std::to_string(backend_node->port()));
 
     int backend_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (backend_fd < 0) {
@@ -93,8 +98,10 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
         backend_node->increment_connections();
         lb::metrics::Metrics::instance().increment_backend_routed(backend_key);
         lb::metrics::Metrics::instance().increment_connections_active();
+        lb::logging::Logger::instance().debug("Backend connection established to " + backend_key);
     } else {
         backend_conn->set_state(net::ConnectionState::CONNECTING);
+        lb::logging::Logger::instance().debug("Backend connection in progress to " + backend_key);
     }
 
     int client_fd = client_conn->fd();

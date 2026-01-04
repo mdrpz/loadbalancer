@@ -13,6 +13,7 @@
 #include "config/config.h"
 #include "core/backend_node.h"
 #include "health/health_checker.h"
+#include "logging/logger.h"
 #include "metrics/metrics.h"
 
 namespace lb::core {
@@ -78,21 +79,30 @@ LoadBalancer::~LoadBalancer() {
 
 bool LoadBalancer::initialize(const std::string& listen_host, uint16_t listen_port) {
     listener_ = std::make_unique<net::TcpListener>();
-    if (!listener_->bind(listen_host, listen_port))
+    if (!listener_->bind(listen_host, listen_port)) {
+        lb::logging::Logger::instance().error("Failed to bind to " + listen_host + ":" +
+                                              std::to_string(listen_port));
         return false;
-    if (!listener_->listen())
+    }
+    if (!listener_->listen()) {
+        lb::logging::Logger::instance().error("Failed to listen on " + listen_host + ":" +
+                                              std::to_string(listen_port));
         return false;
+    }
     int listener_fd = listener_->fd();
     if (!reactor_->add_fd(listener_fd, EPOLLIN, [this](int fd, net::EventType type) {
             (void)fd;
             (void)type;
             handle_accept();
         })) {
+        lb::logging::Logger::instance().error("Failed to register listener with reactor");
         return false;
     }
     if (health_checker_)
         health_checker_->start();
 
+    lb::logging::Logger::instance().info("Load balancer initialized on " + listen_host + ":" +
+                                         std::to_string(listen_port));
     return true;
 }
 
@@ -146,6 +156,9 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
 void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>& config) {
     if (!config)
         return;
+
+    lb::logging::Logger::instance().info("Applying configuration reload");
+
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
@@ -165,16 +178,23 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         if (new_backend_keys.find(key) == new_backend_keys.end()) {
             if (backend->state() != BackendState::DRAINING) {
                 backend->set_state(BackendState::DRAINING);
+                lb::logging::Logger::instance().info("Backend " + backend->host() + ":" +
+                                                     std::to_string(backend->port()) +
+                                                     " marked as DRAINING");
             }
         }
     }
 
     for (const auto& backend_cfg : config->backends) {
         auto existing = backend_pool_->find_backend(backend_cfg.host, backend_cfg.port);
-        if (!existing)
+        if (!existing) {
             add_backend(backend_cfg.host, backend_cfg.port);
-        else if (existing->state() == BackendState::DRAINING)
+        } else if (existing->state() == BackendState::DRAINING) {
             existing->set_state(BackendState::HEALTHY);
+            lb::logging::Logger::instance().info("Backend " + backend_cfg.host + ":" +
+                                                 std::to_string(backend_cfg.port) +
+                                                 " restored to HEALTHY");
+        }
     }
     cleanup_drained_backends();
 }
@@ -183,6 +203,8 @@ void LoadBalancer::cleanup_drained_backends() {
     auto all_backends = backend_pool_->get_all_backends();
     for (const auto& backend : all_backends) {
         if (backend->state() == BackendState::DRAINING && backend->active_connections() == 0) {
+            lb::logging::Logger::instance().info("Removing drained backend " + backend->host() +
+                                                 ":" + std::to_string(backend->port()));
             backend_pool_->remove_backend(backend->host(), backend->port());
             if (health_checker_)
                 health_checker_->remove_backend(backend);
@@ -199,6 +221,8 @@ void LoadBalancer::add_backend(const std::string& host, uint16_t port) {
 
     if (health_checker_)
         health_checker_->add_backend(backend);
+
+    lb::logging::Logger::instance().info("Added backend " + host + ":" + std::to_string(port));
 }
 
 void LoadBalancer::handle_accept() {
@@ -213,10 +237,15 @@ void LoadBalancer::handle_accept() {
         size_t established_count = connection_manager_->count_established_connections();
         if (established_count >= max_global_connections_) {
             lb::metrics::Metrics::instance().increment_overload_drops();
+            lb::logging::Logger::instance().warn("Connection rejected: global connection limit (" +
+                                                 std::to_string(max_global_connections_) +
+                                                 ") exceeded");
             ::close(client_fd);
             continue;
         }
         lb::metrics::Metrics::instance().increment_connections_total();
+        lb::logging::Logger::instance().debug(
+            "New connection accepted (fd=" + std::to_string(client_fd) + ")");
         auto client_conn = std::make_unique<net::Connection>(client_fd);
         client_conn->set_state(net::ConnectionState::ESTABLISHED);
         backend_connector_->connect(std::move(client_conn), 0);

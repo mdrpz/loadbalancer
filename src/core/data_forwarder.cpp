@@ -3,8 +3,6 @@
 
 #include <utility>
 
-#include <utility>
-
 namespace lb::core {
 
 DataForwarder::DataForwarder(net::EpollReactor& reactor,

@@ -78,7 +78,7 @@ private:
     std::time_t last_modified_time_;
     bool yaml_cpp_warning_shown_;
 
-    static [[nodiscard]] std::time_t get_file_mtime(const std::string& path);
+    [[nodiscard]] static std::time_t get_file_mtime(const std::string& path);
 };
 
 } // namespace lb::config

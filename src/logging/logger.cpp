@@ -1,9 +1,16 @@
 #include "logging/logger.h"
 #include <chrono>
+#include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#ifdef _POSIX_C_SOURCE
+#define HAVE_LOCALTIME_R
+#endif
+#if defined(__linux__) || defined(__APPLE__)
+#define HAVE_LOCALTIME_R
+#endif
 
 namespace lb::logging {
 
@@ -48,15 +55,30 @@ void Logger::stop() {
 }
 
 void Logger::log(LogLevel level, const std::string& message) {
-    if (level < level_) {
+    if (!running_.load(std::memory_order_acquire))
         return;
-    }
+    if (level < level_)
+        return;
 
     std::ostringstream oss;
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
 
-    oss << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
+    struct tm time_buf;
+    struct tm* time_info = nullptr;
+#ifdef HAVE_LOCALTIME_R
+    time_info = localtime_r(&time_t, &time_buf);
+#else
+    time_info = std::localtime(&time_t);
+    if (time_info) {
+        time_buf = *time_info;
+        time_info = &time_buf;
+    }
+#endif
+    if (!time_info)
+        oss << "1970-01-01 00:00:00";
+    else
+        oss << std::put_time(time_info, "%Y-%m-%d %H:%M:%S");
     oss << " [";
 
     switch (level) {
