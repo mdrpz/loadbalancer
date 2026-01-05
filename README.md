@@ -1,6 +1,6 @@
 # C++ Load Balancer
 
-A TCP load balancer built in C++20 using epoll for high-performance I/O.
+A TCP load balancer built in C++20 using epoll for high-performance I/O
 
 ## Features
 
@@ -30,7 +30,7 @@ cmake ..
 cmake --build .
 ```
 
-**Note:** If yaml-cpp is installed after running `cmake ..`, reconfigure with `cmake ..` again.
+**Note:** If yaml-cpp is installed after running `cmake ..`, reconfigure with `cmake ..` again
 
 ### Build Options
 
@@ -41,7 +41,7 @@ cmake --build .
 
 ### YAML Config File (Recommended)
 
-Edit `config.yaml` in the project root. The config file is automatically reloaded every 5 seconds if modified.
+Edit `config.yaml` in the project root. The config file is automatically reloaded every 5 seconds if modified
 
 **TLS Configuration:**
 
@@ -50,7 +50,7 @@ To enable TLS termination, set `tls_enabled: true` in `config.yaml` and generate
 ./scripts/generate_test_cert.sh
 ```
 
-**Note:** TLS is terminated at the load balancer; backends receive plain TCP connections.
+**Note:** TLS is terminated at the load balancer; backends receive plain TCP connections
 
 ### Command-Line Arguments (Legacy)
 
@@ -68,7 +68,7 @@ cd build
 ./lb ../config.yaml
 ```
 
-Config changes are automatically reloaded every 5 seconds. Removed backends are marked as DRAINING (existing connections continue, no new connections routed).
+Config changes are automatically reloaded every 5 seconds. Removed backends are marked as DRAINING (existing connections continue, no new connections routed)
 
 ### Using Command-Line
 
