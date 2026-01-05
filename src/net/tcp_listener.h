@@ -10,17 +10,15 @@ public:
     TcpListener();
     ~TcpListener();
 
-    // Non-copyable
     TcpListener(const TcpListener&) = delete;
     TcpListener& operator=(const TcpListener&) = delete;
 
-    // Movable
     TcpListener(TcpListener&&) noexcept;
     TcpListener& operator=(TcpListener&&) noexcept;
 
     bool bind(const std::string& host, uint16_t port);
     [[nodiscard]] bool listen(int backlog = 128) const;
-    [[nodiscard]] int accept() const; // Returns fd or -1 on error
+    [[nodiscard]] int accept() const;
 
     [[nodiscard]] int fd() const {
         return fd_;

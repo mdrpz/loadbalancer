@@ -4,6 +4,9 @@
 #include <memory>
 #include <vector>
 
+struct ssl_st;
+using SSL = struct ssl_st;
+
 namespace lb::net {
 
 enum class ConnectionState { HANDSHAKE, CONNECTING, ESTABLISHED, CLOSED };
@@ -13,7 +16,6 @@ public:
     Connection(int fd);
     ~Connection();
 
-    // Non-copyable
     Connection(const Connection&) = delete;
     Connection& operator=(const Connection&) = delete;
 
@@ -34,7 +36,6 @@ public:
         peer_ = peer;
     }
 
-    // Buffer operations
     [[nodiscard]] size_t read_available() const;
     [[nodiscard]] size_t write_available() const;
     bool read_from_fd();
@@ -49,12 +50,23 @@ public:
 
     void close();
 
+    void set_ssl(SSL* ssl) {
+        ssl_ = ssl;
+    }
+    [[nodiscard]] SSL* ssl() const {
+        return ssl_;
+    }
+    [[nodiscard]] bool is_tls() const {
+        return ssl_ != nullptr;
+    }
+
 private:
     int fd_;
     ConnectionState state_;
-    Connection* peer_; // Cross-wired connection (client <-> backend)
+    Connection* peer_;
+    SSL* ssl_;
 
-    static constexpr size_t MAX_BUFFER_SIZE = 64 * 1024; // 64KB
+    static constexpr size_t MAX_BUFFER_SIZE = 64 * 1024;
     std::vector<uint8_t> read_buf_;
     std::vector<uint8_t> write_buf_;
 };

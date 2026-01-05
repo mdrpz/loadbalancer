@@ -51,3 +51,9 @@ venv/
 *.gcno
 coverage/
 
+# TLS certificates
+certs/
+*.crt
+*.key
+*.pem
+

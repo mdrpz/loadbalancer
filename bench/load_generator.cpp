@@ -8,7 +8,6 @@
 #include <thread>
 #include <vector>
 
-// Simple load generator for benchmarking
 // TODO: Implement full load generator (Phase 4)
 
 int main(int argc, char* argv[]) {

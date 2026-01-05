@@ -3,10 +3,13 @@
 #include <yaml-cpp/yaml.h>
 #endif
 #include <sys/stat.h>
+#include <algorithm>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace lb::config {
 
@@ -49,10 +52,52 @@ bool ConfigManager::load_from_file(const std::string& path) {
                 new_config->listen_port = listener["port"].as<uint16_t>();
             if (listener["tls_enabled"])
                 new_config->tls_enabled = listener["tls_enabled"].as<bool>();
-            if (listener["tls_cert"])
-                new_config->tls_cert_path = listener["tls_cert"].as<std::string>();
-            if (listener["tls_key"])
-                new_config->tls_key_path = listener["tls_key"].as<std::string>();
+            if (listener["tls_cert"]) {
+                auto cert_path = listener["tls_cert"].as<std::string>();
+                if (!cert_path.empty() && !path.empty()) {
+                    try {
+                        std::filesystem::path cert_file(cert_path);
+                        if (!cert_file.is_absolute()) {
+                            std::filesystem::path config_file(path);
+                            auto config_dir = config_file.parent_path();
+                            if (!config_dir.empty()) {
+                                new_config->tls_cert_path = (config_dir / cert_path).string();
+                            } else {
+                                new_config->tls_cert_path = cert_path;
+                            }
+                        } else {
+                            new_config->tls_cert_path = cert_path;
+                        }
+                    } catch (const std::exception&) {
+                        new_config->tls_cert_path = cert_path;
+                    }
+                } else {
+                    new_config->tls_cert_path = cert_path;
+                }
+            }
+            if (listener["tls_key"]) {
+                auto key_path = listener["tls_key"].as<std::string>();
+                if (!key_path.empty() && !path.empty()) {
+                    try {
+                        std::filesystem::path key_file(key_path);
+                        if (!key_file.is_absolute()) {
+                            std::filesystem::path config_file(path);
+                            auto config_dir = config_file.parent_path();
+                            if (!config_dir.empty()) {
+                                new_config->tls_key_path = (config_dir / key_path).string();
+                            } else {
+                                new_config->tls_key_path = key_path;
+                            }
+                        } else {
+                            new_config->tls_key_path = key_path;
+                        }
+                    } catch (const std::exception&) {
+                        new_config->tls_key_path = key_path;
+                    }
+                } else {
+                    new_config->tls_key_path = key_path;
+                }
+            }
         }
 
         if (config["backends"] && config["backends"].IsSequence()) {

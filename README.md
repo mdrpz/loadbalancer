@@ -1,10 +1,11 @@
-# High-End C++ Load Balancer
+# C++ Load Balancer
 
-A production-grade TCP load balancer built in C++20 using epoll for high-performance I/O.
+A TCP load balancer built in C++20 using epoll for high-performance I/O.
 
 ## Features
 
 - **High Performance**: Single-reactor epoll-based architecture
+- **TLS/SSL Termination**: Encrypt client connections while backends remain plain TCP
 - **Health Checking**: Automatic backend health monitoring with configurable thresholds
 - **Backpressure Control**: Bounded buffers with overload protection and timeouts
 - **Hot Reload**: Configuration reload without service interruption
@@ -16,45 +17,20 @@ A production-grade TCP load balancer built in C++20 using epoll for high-perform
 
 ### Prerequisites
 
-- CMake 3.20+
-- C++20 compatible compiler (GCC 10+, Clang 12+)
+- CMake 3.20+, C++20 compiler (GCC 10+, Clang 12+)
 - OpenSSL development libraries
+- yaml-cpp: `sudo apt-get install libyaml-cpp-dev` (Debian/Ubuntu) or `sudo dnf install yaml-cpp-devel` (Fedora/RHEL)
 - Linux (or WSL)
-- yaml-cpp (for config file support)
-
-**Install yaml-cpp:**
-
-On Debian/Ubuntu (WSL):
-```bash
-sudo apt-get update
-sudo apt-get install libyaml-cpp-dev
-```
-
-On Fedora/RHEL:
-```bash
-sudo dnf install yaml-cpp-devel
-```
 
 ### Build Steps
 
 ```bash
-mkdir build
-cd build
+mkdir build && cd build
 cmake ..
 cmake --build .
 ```
 
-**Note:** If you install yaml-cpp after running `cmake ..`, you need to reconfigure:
-```bash
-cmake ..
-cmake --build .
-```
-
-Verify yaml-cpp is detected:
-```bash
-cmake .. 2>&1 | grep -i yaml
-# Should show: -- Found yaml-cpp: ...
-```
+**Note:** If yaml-cpp is installed after running `cmake ..`, reconfigure with `cmake ..` again.
 
 ### Build Options
 
@@ -63,35 +39,36 @@ cmake .. 2>&1 | grep -i yaml
 
 ## Configuration
 
-Configuration can be provided via YAML file or command-line arguments.
+### YAML Config File (Recommended)
+
+Edit `config.yaml` in the project root. The config file is automatically reloaded every 5 seconds if modified.
+
+**TLS Configuration:**
+
+To enable TLS termination, set `tls_enabled: true` in `config.yaml` and generate certificates:
+```bash
+./scripts/generate_test_cert.sh
+```
+
+**Note:** TLS is terminated at the load balancer; backends receive plain TCP connections.
 
 ### Command-Line Arguments (Legacy)
 
 ```bash
 ./lb [port] [host] [backend1:port1,backend2:port2,...]
+# Example: ./lb 8080 0.0.0.0 127.0.0.1:8000,127.0.0.1:8001
 ```
-
-Examples:
-- `./lb 8080 0.0.0.0 127.0.0.1:8000`
-- `./lb 8080 0.0.0.0 127.0.0.1:8000,127.0.0.1:8001`
 
 ## Running
 
 ### Using Config File
 
-From the `build` directory:
 ```bash
+cd build
 ./lb ../config.yaml
 ```
 
-Or from the project root:
-```bash
-./build/lb config.yaml
-```
-
-The config file is automatically reloaded every 5 seconds if modified. Changes to backends will mark removed backends as DRAINING (existing connections continue, no new connections routed).
-
-**Note:** If you see "yaml-cpp not available", install `libyaml-cpp-dev` and rebuild (see Prerequisites above).
+Config changes are automatically reloaded every 5 seconds. Removed backends are marked as DRAINING (existing connections continue, no new connections routed).
 
 ### Using Command-Line
 
@@ -103,36 +80,18 @@ The config file is automatically reloaded every 5 seconds if modified. Changes t
 
 ### Quick Test
 
-1. Start a backend server:
-   ```bash
-   cd tests/python
-   python3 test_backend.py 8000
-   ```
-
-2. Start the load balancer:
-   ```bash
-   cd build
-   ./lb ../config.yaml
-   # or: ./lb 8080 0.0.0.0 127.0.0.1:8000
-   ```
-
-3. Test the connection:
-   ```bash
-   nc localhost 8080
-   # Type messages - they should be echoed back
-   ```
+1. Start backend: `cd tests/python && python3 test_backend.py 8000`
+2. Start load balancer: `cd build && ./lb ../config.yaml`
+3. Test: `nc localhost 8080` (type messages - they should be echoed back)
 
 ### Advanced Testing
 
-**Health Checker**: Stop/start backends to see health state transitions (checks run every 5 seconds)
-
-**Connection Limits**: Connect more than 100 clients to a single backend or 1000 total to test limits
-
-**Backpressure**: Send data faster than backend can consume; slow backends (>10s) timeout
-
-**Failure Handling**: Start with non-existent backends to see retry logic (up to 3 attempts)
-
-**Config Hot Reload**: Edit `config.yaml` while running to see backends marked as DRAINING when removed
+- **Health Checker**: Stop/start backends to see health transitions (checks every 5s)
+- **Connection Limits**: Connect >100 clients per backend or >1000 total
+- **Backpressure**: Send data faster than backend consumes; slow backends (>10s) timeout
+- **Failure Handling**: Start with non-existent backends to see retry logic (up to 3 attempts)
+- **Config Hot Reload**: Edit `config.yaml` while running to see DRAINING state
+- **TLS Testing**: Enable TLS and test with `openssl s_client -connect localhost:8080` or `curl -k https://localhost:8080`
 
 ### Metrics
 
@@ -149,38 +108,20 @@ Access Prometheus metrics at `http://localhost:9090/metrics`:
 
 ### Code Formatting and Linting
 
-The project uses `clang-format` for code formatting and `clang-tidy` for static analysis.
+Install: `sudo apt-get install clang-format clang-tidy` (Debian/Ubuntu) or `sudo dnf install clang-tools-extra` (Fedora/RHEL)
 
-**Install tools (if needed):**
-
-On Debian/Ubuntu:
 ```bash
-sudo apt-get install clang-format clang-tidy
-```
-
-On Fedora/RHEL:
-```bash
-sudo dnf install clang-tools-extra
-```
-
-**Format all C++ files:**
-```bash
+# Format
 find src tests bench -name "*.cpp" -o -name "*.h" | xargs clang-format -i
-```
 
-**Lint all C++ files:**
-```bash
+# Lint
 find src tests bench -name "*.cpp" -o -name "*.h" | xargs clang-tidy -p build
-```
 
-**Apply automatic fixes:**
-```bash
+# Auto-fix
 find src tests bench -name "*.cpp" -o -name "*.h" | xargs clang-tidy -p build --fix
 ```
 
-Configuration files:
-- `.clang-format` - Code formatting style (LLVM-based)
-- `.clang-tidy` - Static analysis checks
+Configuration: `.clang-format` (LLVM-based), `.clang-tidy` (static analysis)
 
 ### Running Tests
 

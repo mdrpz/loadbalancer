@@ -88,12 +88,21 @@ void EpollReactor::run() {
             if (it == callbacks_.end())
                 continue;
 
-            if (ev & (EPOLLERR | EPOLLHUP))
+            if (ev & (EPOLLERR | EPOLLHUP)) {
                 it->second(fd, EventType::ERROR);
-            if (ev & EPOLLIN)
+                it = callbacks_.find(fd);
+                if (it == callbacks_.end())
+                    continue;
+            }
+            if (ev & EPOLLIN) {
                 it->second(fd, EventType::READ);
-            if (ev & EPOLLOUT)
+                it = callbacks_.find(fd); // Re-check
+                if (it == callbacks_.end())
+                    continue;
+            }
+            if (ev & EPOLLOUT) {
                 it->second(fd, EventType::WRITE);
+            }
         }
     }
 }

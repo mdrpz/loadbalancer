@@ -15,6 +15,7 @@
 #include "health/health_checker.h"
 #include "logging/logger.h"
 #include "metrics/metrics.h"
+#include "tls/tls_context.h"
 
 namespace lb::core {
 
@@ -50,12 +51,30 @@ LoadBalancer::LoadBalancer()
             backpressure_manager_->check_timeout(
                 fd, [this](int f) { connection_manager_->close_connection(f); });
         },
-        [this](int fd) { connection_manager_->close_connection(fd); },
+        [this](int fd) {
+            auto* conn = connection_manager_->get_connection(fd);
+            if (conn && conn->is_tls() && tls_context_) {
+                SSL* ssl = conn->ssl();
+                if (ssl) {
+                    conn->set_ssl(nullptr);
+                    tls_context_->destroy_ssl(ssl);
+                }
+            }
+            connection_manager_->close_connection(fd);
+        },
         [this](int fd) { connection_manager_->close_backend_connection_only(fd); },
         [this](net::Connection* from, net::Connection* to) { data_forwarder_->forward(from, to); },
         [this](int fd) { backpressure_manager_->clear_tracking(fd); },
         [this](std::unique_ptr<net::Connection> conn, int retry_count) {
             retry_handler_->retry(std::move(conn), retry_count);
+        },
+        [this](int fd) {
+            auto it = connections_.find(fd);
+            if (it != connections_.end() && it->second) {
+                auto client_conn = std::move(it->second);
+                connections_.erase(it);
+                backend_connector_->connect(std::move(client_conn), 0);
+            }
         });
 
     backend_connector_ = std::make_unique<BackendConnector>(
@@ -71,9 +90,19 @@ LoadBalancer::LoadBalancer()
 LoadBalancer::~LoadBalancer() {
     if (health_checker_)
         health_checker_->stop();
-    for (auto& [fd, conn] : connections_)
+
+    if (tls_context_) {
+        for (auto& [fd, conn] : connections_) {
+            if (conn && conn->is_tls()) {
+                tls_context_->destroy_ssl(conn->ssl());
+            }
+        }
+    }
+
+    for (auto& [fd, conn] : connections_) {
         if (conn)
             conn->close();
+    }
     connections_.clear();
 }
 
@@ -145,6 +174,20 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
 
     backpressure_manager_ =
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
+
+    if (config->tls_enabled) {
+        tls_context_ = std::make_unique<lb::tls::TlsContext>();
+        if (!tls_context_->initialize()) {
+            lb::logging::Logger::instance().error("Failed to initialize TLS context");
+            return false;
+        }
+        if (!tls_context_->load_certificate(config->tls_cert_path, config->tls_key_path)) {
+            lb::logging::Logger::instance().error("Failed to load TLS certificate/key");
+            return false;
+        }
+        lb::logging::Logger::instance().info("TLS enabled with certificate: " +
+                                             config->tls_cert_path);
+    }
 
     for (const auto& backend_cfg : config->backends) {
         add_backend(backend_cfg.host, backend_cfg.port);
@@ -247,8 +290,33 @@ void LoadBalancer::handle_accept() {
         lb::logging::Logger::instance().debug(
             "New connection accepted (fd=" + std::to_string(client_fd) + ")");
         auto client_conn = std::make_unique<net::Connection>(client_fd);
-        client_conn->set_state(net::ConnectionState::ESTABLISHED);
-        backend_connector_->connect(std::move(client_conn), 0);
+
+        if (tls_context_ && tls_context_->is_initialized()) {
+            SSL* ssl = tls_context_->create_ssl(client_fd);
+            if (!ssl) {
+                lb::logging::Logger::instance().error(
+                    "Failed to create SSL object for connection (fd=" + std::to_string(client_fd) +
+                    ")");
+                ::close(client_fd);
+                continue;
+            }
+            client_conn->set_ssl(ssl);
+            client_conn->set_state(net::ConnectionState::HANDSHAKE);
+            lb::logging::Logger::instance().debug(
+                "TLS connection created, starting handshake (fd=" + std::to_string(client_fd) +
+                ")");
+
+            int client_fd_stored = client_conn->fd();
+            connections_[client_fd_stored] = std::move(client_conn);
+
+            reactor_->add_fd(client_fd_stored, EPOLLIN | EPOLLOUT,
+                             [this](int fd, net::EventType type) {
+                                 event_handlers_->handle_client_event(fd, type);
+                             });
+        } else {
+            client_conn->set_state(net::ConnectionState::ESTABLISHED);
+            backend_connector_->connect(std::move(client_conn), 0);
+        }
     }
 }
 

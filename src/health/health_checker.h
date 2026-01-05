@@ -35,7 +35,6 @@ private:
     uint32_t failure_threshold_;
     uint32_t success_threshold_;
 
-    // Track consecutive failures/successes per backend
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_failures_;
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_successes_;
     std::mutex state_mutex_;

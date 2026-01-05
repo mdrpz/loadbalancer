@@ -56,9 +56,9 @@ void ConnectionManager::close_connection(int fd) {
 
     conn->set_state(net::ConnectionState::CLOSED);
 
-    bool is_client_connection = (backend_connections_.find(fd) == backend_connections_.end());
-
     auto backend_it = backend_connections_.find(fd);
+    bool is_client_connection = (backend_it == backend_connections_.end());
+
     std::string backend_info;
     if (backend_it != backend_connections_.end()) {
         if (auto backend_node = backend_it->second.lock()) {
@@ -66,8 +66,8 @@ void ConnectionManager::close_connection(int fd) {
             backend_info =
                 " backend=" + backend_node->host() + ":" + std::to_string(backend_node->port());
         }
+        backend_connections_.erase(backend_it);
     }
-    backend_connections_.erase(backend_it);
 
     if (is_client_connection) {
         lb::metrics::Metrics::instance().decrement_connections_active();
@@ -107,8 +107,8 @@ void ConnectionManager::close_connection(int fd) {
                     if (auto backend_node = peer_backend_it->second.lock()) {
                         backend_node->decrement_connections();
                     }
+                    backend_connections_.erase(peer_backend_it);
                 }
-                backend_connections_.erase(peer_backend_it);
                 connection_times_.erase(peer_fd);
                 backpressure_times_.erase(peer_fd);
                 client_retry_counts_.erase(peer_fd);
@@ -140,8 +140,8 @@ void ConnectionManager::close_backend_connection_only(int backend_fd) {
             if (auto backend_node = backend_it->second.lock()) {
                 backend_node->decrement_connections();
             }
+            backend_connections_.erase(backend_it);
         }
-        backend_connections_.erase(backend_it);
         connection_times_.erase(backend_fd);
         backpressure_times_.erase(backend_fd);
         backend_to_client_map_.erase(backend_fd);

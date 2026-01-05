@@ -25,12 +25,14 @@ public:
                   std::function<void(int)> close_backend_only,
                   std::function<void(net::Connection*, net::Connection*)> forward_data,
                   std::function<void(int)> clear_backpressure,
-                  std::function<void(std::unique_ptr<net::Connection>, int)> retry);
+                  std::function<void(std::unique_ptr<net::Connection>, int)> retry,
+                  std::function<void(int)> on_tls_handshake_complete);
 
     void handle_client_event(int fd, net::EventType type);
     void handle_backend_event(int fd, net::EventType type);
 
 private:
+    bool handle_tls_handshake(net::Connection* conn, int fd);
     std::unordered_map<int, std::unique_ptr<net::Connection>>& connections_;
     std::unordered_map<int, std::weak_ptr<BackendNode>>& backend_connections_;
     std::unordered_map<int, std::chrono::steady_clock::time_point>& connection_times_;
@@ -46,6 +48,7 @@ private:
     std::function<void(net::Connection*, net::Connection*)> forward_data_;
     std::function<void(int)> clear_backpressure_;
     std::function<void(std::unique_ptr<net::Connection>, int)> retry_;
+    std::function<void(int)> on_tls_handshake_complete_;
 
     bool try_retry_on_backend_error(int backend_fd);
 };

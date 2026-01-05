@@ -4,15 +4,12 @@ Pytest configuration and fixtures for load balancer integration tests.
 import pytest
 import subprocess
 import time
-import socket
-import asyncio
 from pathlib import Path
 
 
 @pytest.fixture(scope="session")
 def lb_binary():
     """Path to the load balancer binary."""
-    # Assumes build directory is ./build
     binary = Path(__file__).parent.parent.parent / "build" / "lb"
     if not binary.exists():
         pytest.skip("Load balancer binary not found. Run 'cmake --build build' first.")
@@ -31,7 +28,6 @@ def lb_process(lb_binary, tmp_path):
         stderr=subprocess.PIPE
     )
     
-    # Give it a moment to start
     time.sleep(0.5)
     
     yield proc

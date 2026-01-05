@@ -1,4 +1,6 @@
 #include "core/event_handlers.h"
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -21,7 +23,8 @@ EventHandlers::EventHandlers(
     std::function<void(int)> close_backend_only,
     std::function<void(net::Connection*, net::Connection*)> forward_data,
     std::function<void(int)> clear_backpressure,
-    std::function<void(std::unique_ptr<net::Connection>, int)> retry)
+    std::function<void(std::unique_ptr<net::Connection>, int)> retry,
+    std::function<void(int)> on_tls_handshake_complete)
     : connections_(connections), backend_connections_(backend_connections),
       connection_times_(connection_times), backend_to_client_map_(backend_to_client_map),
       client_retry_counts_(client_retry_counts), reactor_(reactor),
@@ -32,7 +35,8 @@ EventHandlers::EventHandlers(
       close_backend_only_(std::move(std::move(close_backend_only))),
       forward_data_(std::move(std::move(forward_data))),
       clear_backpressure_(std::move(std::move(clear_backpressure))),
-      retry_(std::move(std::move(retry))) {}
+      retry_(std::move(std::move(retry))),
+      on_tls_handshake_complete_(std::move(on_tls_handshake_complete)) {}
 
 bool EventHandlers::try_retry_on_backend_error(int backend_fd) {
     // Get client connection for retry
@@ -69,6 +73,15 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
 
     if (type == net::EventType::ERROR || type == net::EventType::HUP) {
         close_connection_(fd);
+        return;
+    }
+
+    if (conn->state() == net::ConnectionState::HANDSHAKE) {
+        if (type == net::EventType::READ || type == net::EventType::WRITE) {
+            if (!handle_tls_handshake(conn, fd)) {
+                close_connection_(fd);
+            }
+        }
         return;
     }
 
@@ -240,6 +253,71 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
         if (conn->peer())
             clear_backpressure_(conn->peer()->fd());
     }
+}
+
+bool EventHandlers::handle_tls_handshake(net::Connection* conn, int fd) {
+    if (!conn || !conn->is_tls()) {
+        return false;
+    }
+
+    SSL* ssl = conn->ssl();
+    if (!ssl) {
+        lb::logging::Logger::instance().error("TLS: SSL object is null for fd=" +
+                                              std::to_string(fd));
+        return false;
+    }
+
+    int result = 0;
+    try {
+        result = SSL_accept(ssl);
+    } catch (...) {
+        lb::logging::Logger::instance().error("TLS: Exception during SSL_accept for fd=" +
+                                              std::to_string(fd));
+        return false;
+    }
+
+    if (result == 1) {
+        conn->set_state(net::ConnectionState::ESTABLISHED);
+        lb::logging::Logger::instance().debug("TLS handshake completed (fd=" + std::to_string(fd) +
+                                              ")");
+
+        reactor_.mod_fd(fd, EPOLLIN | EPOLLOUT);
+
+        if (on_tls_handshake_complete_) {
+            on_tls_handshake_complete_(fd);
+        }
+        return true;
+    }
+
+    int ssl_error = SSL_ERROR_NONE;
+    try {
+        ssl_error = SSL_get_error(ssl, result);
+    } catch (...) {
+        lb::logging::Logger::instance().error("TLS: Exception during SSL_get_error for fd=" +
+                                              std::to_string(fd));
+        return false;
+    }
+
+    if (ssl_error == SSL_ERROR_WANT_READ) {
+        reactor_.mod_fd(fd, EPOLLIN);
+        return true;
+    }
+
+    if (ssl_error == SSL_ERROR_WANT_WRITE) {
+        reactor_.mod_fd(fd, EPOLLOUT);
+        return true;
+    }
+
+    unsigned long err = ERR_get_error();
+    std::string error_msg = "TLS handshake failed (fd=" + std::to_string(fd) +
+                            ", SSL_get_error: " + std::to_string(ssl_error) + ")";
+    if (err != 0) {
+        char err_buf[256];
+        ERR_error_string_n(err, err_buf, sizeof(err_buf));
+        error_msg += ": " + std::string(err_buf);
+    }
+    lb::logging::Logger::instance().error(error_msg);
+    return false;
 }
 
 } // namespace lb::core

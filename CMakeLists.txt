@@ -62,6 +62,11 @@ target_link_libraries(lb_lib
     Threads::Threads
 )
 
+# Link filesystem library (required for std::filesystem on some compilers)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "9.0")
+    target_link_libraries(lb_lib PRIVATE stdc++fs)
+endif()
+
 # Conditionally link yaml-cpp
 if(yaml-cpp_FOUND)
     target_link_libraries(lb_lib PRIVATE yaml-cpp)
