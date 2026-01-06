@@ -20,6 +20,8 @@ struct Config {
     std::string tls_cert_path;
     std::string tls_key_path;
 
+    std::string mode; // "tcp" or "http"
+
     std::vector<BackendConfig> backends;
 
     std::string routing_algorithm; // "round_robin" or "least_connections"

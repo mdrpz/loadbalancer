@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include "config/config.h"
 #include "core/backend_node.h"
+#include "core/http_data_forwarder.h"
 #include "health/health_checker.h"
 #include "logging/logger.h"
 #include "metrics/metrics.h"
@@ -21,7 +22,8 @@ namespace lb::core {
 
 LoadBalancer::LoadBalancer()
     : max_global_connections_(1000), max_connections_per_backend_(100),
-      backpressure_timeout_ms_(10000), connection_timeout_seconds_(5), config_manager_(nullptr) {
+      backpressure_timeout_ms_(10000), connection_timeout_seconds_(5), config_manager_(nullptr),
+      mode_("tcp") {
     reactor_ = std::make_unique<net::EpollReactor>();
     backend_pool_ = std::make_unique<BackendPool>();
     health_checker_ = std::make_unique<lb::health::HealthChecker>();
@@ -63,7 +65,13 @@ LoadBalancer::LoadBalancer()
             connection_manager_->close_connection(fd);
         },
         [this](int fd) { connection_manager_->close_backend_connection_only(fd); },
-        [this](net::Connection* from, net::Connection* to) { data_forwarder_->forward(from, to); },
+        [this](net::Connection* from, net::Connection* to) {
+            if (mode_ == "http" && http_data_forwarder_) {
+                http_data_forwarder_->forward(from, to);
+            } else {
+                data_forwarder_->forward(from, to);
+            }
+        },
         [this](int fd) { backpressure_manager_->clear_tracking(fd); },
         [this](std::unique_ptr<net::Connection> conn, int retry_count) {
             retry_handler_->retry(std::move(conn), retry_count);
@@ -171,9 +179,34 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
+    mode_ = config->mode.empty() ? "tcp" : config->mode;
 
     backpressure_manager_ =
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
+
+    if (mode_ == "http") {
+        http_data_forwarder_ = std::make_unique<HttpDataForwarder>(
+            *reactor_, [this](int fd) { backpressure_manager_->start_tracking(fd); },
+            [this](int fd) { backpressure_manager_->clear_tracking(fd); },
+            [this](int fd) { connection_manager_->close_connection(fd); },
+            [this](int fd) {
+                auto* conn = connection_manager_->get_connection(fd);
+                if (conn) {
+                    struct sockaddr_in addr;
+                    socklen_t len = sizeof(addr);
+                    if (getpeername(fd, reinterpret_cast<struct sockaddr*>(&addr), &len) == 0) {
+                        char ip_str[INET_ADDRSTRLEN];
+                        if (inet_ntop(AF_INET, &addr.sin_addr, ip_str, INET_ADDRSTRLEN) !=
+                            nullptr) {
+                            return std::string(ip_str);
+                        }
+                    }
+                }
+                return std::string();
+            },
+            tls_context_ && tls_context_->is_initialized());
+        lb::logging::Logger::instance().info("HTTP mode enabled");
+    }
 
     if (config->tls_enabled) {
         tls_context_ = std::make_unique<lb::tls::TlsContext>();

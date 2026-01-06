@@ -11,6 +11,7 @@
 #include "core/connection_manager.h"
 #include "core/data_forwarder.h"
 #include "core/event_handlers.h"
+#include "core/http_data_forwarder.h"
 #include "core/retry_handler.h"
 #include "health/health_checker.h"
 #include "net/connection.h"
@@ -75,10 +76,13 @@ private:
     std::unique_ptr<EventHandlers> event_handlers_;
     std::unique_ptr<BackendConnector> backend_connector_;
     std::unique_ptr<DataForwarder> data_forwarder_;
+    std::unique_ptr<HttpDataForwarder> http_data_forwarder_;
     std::unique_ptr<BackpressureManager> backpressure_manager_;
     std::unique_ptr<RetryHandler> retry_handler_;
 
     lb::config::ConfigManager* config_manager_;
+
+    std::string mode_;
 };
 
 } // namespace lb::core

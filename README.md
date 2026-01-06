@@ -78,7 +78,7 @@ Config changes are automatically reloaded every 5 seconds. Removed backends are 
 
 ## Testing
 
-### Quick Test
+### Quick Test (TCP mode)
 
 1. Start backend: `cd tests/python && python3 test_backend.py 8000`
 2. Start load balancer: `cd build && ./lb ../config.yaml`
@@ -92,6 +92,28 @@ Config changes are automatically reloaded every 5 seconds. Removed backends are 
 - **Failure Handling**: Start with non-existent backends to see retry logic (up to 3 attempts)
 - **Config Hot Reload**: Edit `config.yaml` while running to see DRAINING state
 - **TLS Testing**: Enable TLS and test with `openssl s_client -connect localhost:8080` or `curl -k https://localhost:8080`
+
+### HTTP Mode + Python Integration Tests
+
+- HTTP mode is enabled via config: set `listener.mode: "http"` in `config.yaml`.
+- Python integration tests live under `tests/python` and spin up real TCP backends plus the `lb` binary.
+
+Run the Python tests:
+
+```bash
+cd build
+cmake --build .
+cd ../tests/python
+python3 -m pip install -r requirements.txt
+python3 -m pytest -v
+```
+
+The routing suite covers:
+
+- Round-robin distribution and alternation across backends
+- Least-connections routing
+- Health checking (unhealthy backends stop receiving traffic)
+- Sequential and concurrent request handling
 
 ### Metrics
 
@@ -122,6 +144,21 @@ find src tests bench -name "*.cpp" -o -name "*.h" | xargs clang-tidy -p build --
 ```
 
 Configuration: `.clang-format` (LLVM-based), `.clang-tidy` (static analysis)
+
+#### Python (Ruff)
+
+Python formatting and linting is handled by Ruff:
+
+```bash
+python3 -m pip install --user ruff
+
+# Lint
+python3 -m ruff check tests/python
+
+# Auto-fix and format
+python3 -m ruff check tests/python --fix
+python3 -m ruff format tests/python
+```
 
 ### Running Tests
 
