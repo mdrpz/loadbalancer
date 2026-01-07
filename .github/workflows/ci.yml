@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libssl-dev libyaml-cpp-dev clang-format
+
+      - name: Build
+        run: |
+          mkdir build && cd build
+          cmake .. -DBUILD_TESTS=ON -DBUILD_BENCH=ON
+          cmake --build . -j$(nproc)
+
+      - name: Run C++ tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r tests/python/requirements.txt
+          pip install ruff
+
+      - name: Run Python tests
+        run: |
+          cd tests/python
+          python -m pytest -v
+
+      - name: Check C++ formatting
+        run: |
+          find src bench -name "*.cpp" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+      - name: Check Python linting
+        run: |
+          ruff check .
+          ruff format --check .
+
