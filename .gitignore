@@ -10,9 +10,9 @@ cmake-build-*/
 compile_commands.json
 
 # Executables
-lb
-load_generator
-test_*
+/build/lb
+/build/bench/load_generator
+/build/tests/cpp/test_*
 
 # IDE
 .vscode/
