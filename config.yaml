@@ -2,15 +2,13 @@ listener:
   host: "0.0.0.0"
   port: 8080
   mode: "http"
-  tls_enabled: true
+  tls_enabled: false
   tls_cert: "certs/server.crt"
   tls_key: "certs/server.key"
 
 backends:
   - host: "127.0.0.1"
-    port: 8000
-  - host: "127.0.0.1"
-    port: 8001
+    port: 80
 
 routing:
   algorithm: "round_robin"
