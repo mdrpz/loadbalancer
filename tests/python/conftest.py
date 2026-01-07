@@ -21,8 +21,51 @@ def lb_binary():
     return binary
 
 
+def send_http_request(host, port, path="/", timeout=5.0):
+    """Send a simple HTTP GET request and return the response body."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        sock.connect((host, port))
+
+        request = f"GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n"
+        sock.sendall(request.encode())
+
+        response = b""
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response += chunk
+            if b"\r\n\r\n" in response:
+                headers, body = response.split(b"\r\n\r\n", 1)
+                content_length = None
+                for line in headers.decode().split("\r\n"):
+                    if line.lower().startswith("content-length:"):
+                        content_length = int(line.split(":", 1)[1].strip())
+                        break
+                if content_length and len(body) >= content_length:
+                    break
+
+        if b"\r\n\r\n" in response:
+            _, body = response.split(b"\r\n\r\n", 1)
+            return body.decode().strip()
+        return ""
+    except socket.error:
+        return ""
+    except Exception:
+        return ""
+    finally:
+        sock.close()
+
+
 def create_test_config(
-    tmp_path, lb_port, backend_ports, routing_algorithm="round_robin", tls_enabled=False
+    tmp_path,
+    lb_port,
+    backend_ports,
+    routing_algorithm="round_robin",
+    tls_enabled=False,
+    health_check_interval_ms=200,
 ):
     """Create a minimal test config file."""
     config = {
@@ -39,7 +82,7 @@ def create_test_config(
             "max_global_connections": 1000,
         },
         "health_check": {
-            "interval_ms": 200,  # Very fast for tests
+            "interval_ms": health_check_interval_ms,
             "timeout_ms": 200,
             "failure_threshold": 2,
             "success_threshold": 1,  # Mark healthy after 1 successful check
