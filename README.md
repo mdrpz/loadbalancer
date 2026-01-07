@@ -53,6 +53,8 @@ pip install -r requirements.txt
 python3 -m pytest -v
 ```
 
+**Test coverage:** Round-robin, least-connections, health checks, connection handling, config hot reload, graceful shutdown, TLS termination
+
 ### C++ Unit Tests
 
 ```bash
@@ -89,6 +91,14 @@ find src bench -name "*.cpp" -o -name "*.h" | xargs clang-format -i
 # Python
 python3 -m ruff check . --fix && python3 -m ruff format .
 ```
+
+### CI
+
+GitHub Actions runs on push/PR to `main`:
+- Build (with tests + bench)
+- C++ tests (`ctest`)
+- Python tests (`pytest`)
+- Format/lint checks (`clang-format`, `ruff`)
 
 ### Rebuild After Changes
 
