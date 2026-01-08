@@ -37,9 +37,13 @@ public:
                                                             uint16_t port) const;
 
 private:
+    std::shared_ptr<BackendNode> select_weighted_round_robin(
+        const std::vector<std::shared_ptr<BackendNode>>& healthy);
+
     std::vector<std::shared_ptr<BackendNode>> backends_;
     RoutingAlgorithm algorithm_;
     uint32_t round_robin_index_;
+    uint32_t weighted_counter_;
 };
 
 } // namespace lb::core

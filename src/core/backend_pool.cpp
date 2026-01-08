@@ -4,7 +4,7 @@
 namespace lb::core {
 
 BackendPool::BackendPool(RoutingAlgorithm algorithm)
-    : algorithm_(algorithm), round_robin_index_(0) {}
+    : algorithm_(algorithm), round_robin_index_(0), weighted_counter_(0) {}
 
 void BackendPool::add_backend(const std::shared_ptr<BackendNode>& backend) {
     backends_.push_back(backend);
@@ -36,20 +36,44 @@ std::shared_ptr<BackendNode> BackendPool::select_backend(uint32_t max_connection
         return nullptr;
 
     if (algorithm_ == RoutingAlgorithm::ROUND_ROBIN) {
-        auto selected = healthy[round_robin_index_ % healthy.size()];
-        round_robin_index_++;
-        return selected;
+        return select_weighted_round_robin(healthy);
     }
     if (algorithm_ == RoutingAlgorithm::LEAST_CONNECTIONS) {
         auto min_it = std::min_element(
             healthy.begin(), healthy.end(),
             [](const std::shared_ptr<BackendNode>& a, const std::shared_ptr<BackendNode>& b) {
-                return a->active_connections() < b->active_connections();
+                double load_a = static_cast<double>(a->active_connections()) / a->weight();
+                double load_b = static_cast<double>(b->active_connections()) / b->weight();
+                return load_a < load_b;
             });
         return *min_it;
     }
 
     return nullptr;
+}
+
+std::shared_ptr<BackendNode> BackendPool::select_weighted_round_robin(
+    const std::vector<std::shared_ptr<BackendNode>>& healthy) {
+    uint32_t total_weight = 0;
+    for (const auto& backend : healthy) {
+        total_weight += backend->weight();
+    }
+
+    if (total_weight == 0)
+        return healthy[0];
+
+    uint32_t target = weighted_counter_ % total_weight;
+    weighted_counter_++;
+
+    uint32_t cumulative = 0;
+    for (const auto& backend : healthy) {
+        cumulative += backend->weight();
+        if (target < cumulative) {
+            return backend;
+        }
+    }
+
+    return healthy[0];
 }
 
 std::shared_ptr<BackendNode> BackendPool::find_backend(const std::string& host,

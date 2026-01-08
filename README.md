@@ -34,6 +34,10 @@ listener:
 backends:
   - host: "127.0.0.1"
     port: 8000
+    weight: 3               # Gets 3x traffic (default: 1)
+  - host: "127.0.0.1"
+    port: 8001
+    weight: 1               # Gets 1x traffic
 
 routing:
   algorithm: "round_robin"  # or "least_connections"
@@ -50,7 +54,7 @@ connection_pool:
 - **Health Checks** - Auto-removes unhealthy backends
 - **Hot Reload** - Config changes apply without restart
 - **Connection Pooling** - Reuses backend connections (-36% p95 latency)
-- **Routing** - Round-robin or least-connections
+- **Routing** - Round-robin, least-connections, weighted
 - **Metrics** - Prometheus endpoint at `:9090/metrics`
 
 ## Architecture
@@ -112,3 +116,28 @@ Available at `http://localhost:9090/metrics`:
 - `lb_backend_routed_total{backend="..."}`
 - `lb_backend_failures_total{backend="..."}`
 - `lb_overload_drops`
+
+## Troubleshooting
+
+**Port already in use:**
+```bash
+# Find what's using a port
+lsof -i :8080
+
+# Kill process on a specific port
+kill $(lsof -t -i :8080)
+
+# Or force kill
+kill -9 $(lsof -t -i :8080)
+```
+
+**Kill all test servers:**
+```bash
+pkill -f "http.server"
+pkill -f "./lb"
+```
+
+**Check if LB is running:**
+```bash
+curl -s http://localhost:8080/ && echo "LB OK" || echo "LB not responding"
+```

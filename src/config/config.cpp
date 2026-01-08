@@ -118,6 +118,8 @@ bool ConfigManager::load_from_file(const std::string& path) {
                     backend_cfg.host = backend["host"].as<std::string>();
                 if (backend["port"])
                     backend_cfg.port = backend["port"].as<uint16_t>();
+                if (backend["weight"])
+                    backend_cfg.weight = backend["weight"].as<uint32_t>();
                 new_config->backends.push_back(backend_cfg);
             }
         }

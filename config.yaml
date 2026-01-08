@@ -9,7 +9,11 @@ listener:
 
 backends:
   - host: "127.0.0.1"
-    port: 80  # nginx default port (use 8000 for python http.server)
+    port: 8000   # nginx default port (use 8000 for python http.server)
+    weight: 3   # Optional: for weighted routing (default: 1)
+  - host: "127.0.0.1"
+    port: 8001
+    weight: 1
 
 routing:
   algorithm: "round_robin"

@@ -10,13 +10,16 @@ enum class BackendState { HEALTHY, UNHEALTHY, DRAINING };
 
 class BackendNode {
 public:
-    BackendNode(std::string host, uint16_t port);
+    BackendNode(std::string host, uint16_t port, uint32_t weight = 1);
 
     [[nodiscard]] const std::string& host() const {
         return host_;
     }
     [[nodiscard]] uint16_t port() const {
         return port_;
+    }
+    [[nodiscard]] uint32_t weight() const {
+        return weight_;
     }
 
     [[nodiscard]] BackendState state() const {
@@ -49,6 +52,7 @@ public:
 private:
     std::string host_;
     uint16_t port_;
+    uint32_t weight_;
     std::atomic<BackendState> state_;
     std::atomic<uint32_t> active_connections_;
     std::atomic<uint32_t> failure_count_;

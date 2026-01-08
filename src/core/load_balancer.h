@@ -40,7 +40,7 @@ public:
 
     void set_config_manager(lb::config::ConfigManager* config_manager);
 
-    void add_backend(const std::string& host, uint16_t port);
+    void add_backend(const std::string& host, uint16_t port, uint32_t weight = 1);
 
     void apply_config(const std::shared_ptr<const lb::config::Config>& config);
 

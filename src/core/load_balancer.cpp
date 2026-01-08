@@ -248,7 +248,7 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     }
 
     for (const auto& backend_cfg : config->backends) {
-        add_backend(backend_cfg.host, backend_cfg.port);
+        add_backend(backend_cfg.host, backend_cfg.port, backend_cfg.weight);
     }
 
     pool_enabled_ = config->connection_pool_enabled;
@@ -317,7 +317,7 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
     for (const auto& backend_cfg : config->backends) {
         auto existing = backend_pool_->find_backend(backend_cfg.host, backend_cfg.port);
         if (!existing) {
-            add_backend(backend_cfg.host, backend_cfg.port);
+            add_backend(backend_cfg.host, backend_cfg.port, backend_cfg.weight);
         } else if (existing->state() == BackendState::DRAINING) {
             existing->set_state(BackendState::HEALTHY);
             lb::logging::Logger::instance().info("Backend " + backend_cfg.host + ":" +
@@ -341,17 +341,18 @@ void LoadBalancer::cleanup_drained_backends() {
     }
 }
 
-void LoadBalancer::add_backend(const std::string& host, uint16_t port) {
+void LoadBalancer::add_backend(const std::string& host, uint16_t port, uint32_t weight) {
     auto existing = backend_pool_->find_backend(host, port);
     if (existing)
         return;
-    auto backend = std::make_shared<BackendNode>(host, port);
+    auto backend = std::make_shared<BackendNode>(host, port, weight);
     backend_pool_->add_backend(backend);
 
     if (health_checker_)
         health_checker_->add_backend(backend);
 
-    lb::logging::Logger::instance().info("Added backend " + host + ":" + std::to_string(port));
+    lb::logging::Logger::instance().info("Added backend " + host + ":" + std::to_string(port) +
+                                         " (weight=" + std::to_string(weight) + ")");
 }
 
 void LoadBalancer::handle_accept() {

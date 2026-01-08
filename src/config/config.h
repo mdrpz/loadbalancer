@@ -11,6 +11,7 @@ namespace lb::config {
 struct BackendConfig {
     std::string host;
     uint16_t port;
+    uint32_t weight = 1;
 };
 
 struct Config {
