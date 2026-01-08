@@ -16,6 +16,10 @@ ConnectionManager::ConnectionManager(
       client_retry_counts_(client_retry_counts), backend_to_client_map_(backend_to_client_map),
       reactor_(reactor) {}
 
+void ConnectionManager::set_pool_release_callback(PoolReleaseCallback callback) {
+    pool_release_callback_ = std::move(callback);
+}
+
 net::Connection* ConnectionManager::get_connection(int fd) {
     auto it = connections_.find(fd);
     if (it == connections_.end())
@@ -99,10 +103,11 @@ void ConnectionManager::close_connection(int fd) {
 
         auto peer_it = connections_.find(peer_fd);
         if (peer_it != connections_.end()) {
-            auto* peer_conn = peer_it->second.get();
-            if (peer_conn && peer_conn->state() != net::ConnectionState::CLOSED) {
-                peer_conn->set_peer(nullptr);
+            if (peer_it->second && peer_it->second->state() != net::ConnectionState::CLOSED) {
+                peer_it->second->set_peer(nullptr);
                 auto peer_backend_it = backend_connections_.find(peer_fd);
+                bool is_peer_backend = (peer_backend_it != backend_connections_.end());
+
                 if (peer_backend_it != backend_connections_.end()) {
                     if (auto backend_node = peer_backend_it->second.lock()) {
                         backend_node->decrement_connections();
@@ -114,7 +119,22 @@ void ConnectionManager::close_connection(int fd) {
                 client_retry_counts_.erase(peer_fd);
                 backend_to_client_map_.erase(peer_fd);
                 reactor_.del_fd(peer_fd);
-                peer_conn->close();
+
+                bool released_to_pool = false;
+                if (is_client_connection && is_peer_backend && pool_release_callback_) {
+                    auto peer_conn = std::move(peer_it->second);
+                    released_to_pool = pool_release_callback_(peer_fd, std::move(peer_conn));
+                    if (released_to_pool) {
+                        lb::logging::Logger::instance().debug(
+                            "Backend connection released to pool (fd=" + std::to_string(peer_fd) +
+                            ")");
+                    }
+                    connections_.erase(peer_it);
+                } else {
+                    peer_it->second->close();
+                    connections_.erase(peer_it);
+                }
+            } else {
                 connections_.erase(peer_it);
             }
         }

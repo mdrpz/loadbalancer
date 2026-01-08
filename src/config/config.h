@@ -29,6 +29,12 @@ struct Config {
     uint32_t max_connections_per_backend;
     uint32_t max_global_connections;
 
+    bool connection_pool_enabled;
+    uint32_t pool_min_connections;    // Minimum idle connections per backend
+    uint32_t pool_max_connections;    // Maximum connections per backend
+    uint32_t pool_idle_timeout_ms;    // Close idle connections after this time
+    uint32_t pool_connect_timeout_ms; // Timeout for new pool connections
+
     uint32_t health_check_interval_ms;
     uint32_t health_check_timeout_ms;
     uint32_t health_check_failure_threshold;

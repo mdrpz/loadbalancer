@@ -161,6 +161,9 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                         apply_config(new_config);
                 }
                 cleanup_drained_backends();
+                if (pool_manager_) {
+                    pool_manager_->evict_expired();
+                }
             },
             5000);
 }
@@ -246,6 +249,34 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
 
     for (const auto& backend_cfg : config->backends) {
         add_backend(backend_cfg.host, backend_cfg.port);
+    }
+
+    pool_enabled_ = config->connection_pool_enabled;
+    if (pool_enabled_) {
+        PoolConfig pool_config;
+        pool_config.min_connections = config->pool_min_connections;
+        pool_config.max_connections = config->pool_max_connections;
+        pool_config.max_idle_time_ms = config->pool_idle_timeout_ms;
+        pool_config.connect_timeout_ms = config->pool_connect_timeout_ms;
+        pool_manager_ = std::make_unique<ConnectionPoolManager>(pool_config);
+        backend_connector_->set_pool_manager(pool_manager_.get());
+
+        connection_manager_->set_pool_release_callback(
+            [this](int backend_fd, std::unique_ptr<net::Connection> conn) -> bool {
+                if (!pool_manager_ || !conn)
+                    return false;
+                auto info = backend_connector_->get_backend_info(backend_fd);
+                if (info.host.empty())
+                    return false;
+                conn->clear_buffers();
+                conn->set_state(net::ConnectionState::ESTABLISHED);
+                pool_manager_->release(info.host, info.port, std::move(conn));
+                return true;
+            });
+
+        lb::logging::Logger::instance().info("Connection pooling enabled (max " +
+                                             std::to_string(config->pool_max_connections) +
+                                             " per backend)");
     }
 
     return true;

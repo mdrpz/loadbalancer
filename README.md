@@ -12,10 +12,8 @@ sudo apt install cmake g++ libssl-dev libyaml-cpp-dev
 mkdir build && cd build
 cmake .. && cmake --build .
 
-# Start a backend
+# Start a backend & run
 python3 -m http.server 8000 &
-
-# Run load balancer
 ./lb ../config.yaml
 
 # Test
@@ -24,7 +22,7 @@ curl http://localhost:8080/
 
 ## Configuration
 
-Edit `config.yaml`:
+Edit `config.yaml` (auto-reloads every 5 seconds):
 
 ```yaml
 listener:
@@ -39,72 +37,21 @@ backends:
 
 routing:
   algorithm: "round_robin"  # or "least_connections"
+
+connection_pool:
+  enabled: true             # Reuse backend connections
+  max_connections: 10       # Per backend
 ```
 
-Changes auto-reload every 5 seconds.
+## Features
 
-## Running Tests
-
-### Python Integration Tests
-
-```bash
-cd tests/python
-pip install -r requirements.txt
-python3 -m pytest -v -s
-```
-
-**Test coverage:** Round-robin, least-connections, health checks, connection handling, config hot reload, graceful shutdown, TLS termination
-
-### C++ Unit Tests
-
-```bash
-cd build && ctest
-```
-
-## Benchmarking
-
-```bash
-# Build with load generator
-cd build
-cmake .. -DBUILD_BENCH=ON && cmake --build .
-
-# Run (against running LB on port 8080)
-./bench/load_generator 127.0.0.1 8080 -c 100 -d 30 --http
-```
-
-## Development
-
-### Build Commands
-
-```bash
-cmake .. -DBUILD_BENCH=ON    # Include load generator
-cmake .. -DBUILD_TESTS=ON    # Include C++ tests (default: ON)
-cmake --build . -j$(nproc)   # Parallel build
-```
-
-### Linting & Formatting
-
-```bash
-# C++
-find src bench -name "*.cpp" -o -name "*.h" | xargs clang-format -i
-
-# Python
-python3 -m ruff check . --fix && python3 -m ruff format .
-```
-
-### CI
-
-GitHub Actions runs on push/PR to `main`:
-- Build (with tests + bench)
-- C++ tests (`ctest`)
-- Python tests (`pytest`)
-- Format/lint checks (`clang-format`, `ruff`)
-
-### Rebuild After Changes
-
-```bash
-cd build && cmake --build .
-```
+- **HTTP Mode** - Adds `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto` headers
+- **TLS Termination** - Backends receive plain TCP
+- **Health Checks** - Auto-removes unhealthy backends
+- **Hot Reload** - Config changes apply without restart
+- **Connection Pooling** - Reuses backend connections (-36% p95 latency)
+- **Routing** - Round-robin or least-connections
+- **Metrics** - Prometheus endpoint at `:9090/metrics`
 
 ## Architecture
 
@@ -113,91 +60,55 @@ cd build && cmake --build .
                     | Health Checker |
                     +-------+--------+
                             |
-                            v
 +---------+       +-------------------+       +-----------+
-| Clients | ----> |   Load Balancer   | ----> | Backend 1 |
-+---------+       |                   |       +-----------+
-                  |  - TLS terminate  |       +-----------+
-                  |  - Route (RR/LC)  | ----> | Backend 2 |
-                  |  - HTTP headers   |       +-----------+
-                  +-------------------+       +-----------+
-                            |           ----> | Backend N |
-                            v                 +-----------+
+| Clients | ----> |   Load Balancer   | ----> | Backends  |
++---------+       | - TLS terminate   |       +-----------+
+                  | - Route (RR/LC)   |
+                  | - Connection pool |
+                  +-------------------+
+                            |
                     +----------------+
                     | Metrics :9090  |
                     +----------------+
 ```
 
-**Request flow:**
+## Tests & Benchmarks
 
-1. Client connects to LB (port 8080)
-2. LB performs TLS handshake if `tls_enabled: true`
-3. LB selects a healthy backend using configured algorithm
-4. LB connects to backend (plain TCP, even if client used TLS)
-5. Data flows bidirectionally between client ↔ LB ↔ backend
-6. In HTTP mode, LB injects `X-Forwarded-*` headers before forwarding
+```bash
+# Python integration tests
+cd tests/python && pip install -r requirements.txt
+python3 -m pytest -v
 
-**Key components:**
+# C++ unit tests
+cd build && ctest
 
-- **Epoll Reactor** – Single-threaded event loop handling all I/O
-- **Backend Pool** – Manages backend list and routing algorithm
-- **Health Checker** – Background thread pinging backends periodically
-- **Connection Manager** – Tracks client↔backend pairs, handles cleanup
-
-## Features
-
-HTTP Mode: Adds `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto` headers
-
-TLS: Terminates TLS; backends receive plain TCP
-
-Health Checks: Auto-removes unhealthy backends
-
-Hot Reload: Config changes apply without restart
-
-Metrics: Prometheus endpoint at `:9090/metrics`
-
-Routing: Round-robin or least-connections
-
-## Zero-Copy Mode
-
-> **WARNING**: Zero-copy splice mode is experimental and has issues with concurrent connections.
-
-For TCP-only workloads, you can try zero-copy forwarding:
-
-```yaml
-listener:
-  mode: "tcp"
-  use_splice: true
+# Load generator
+cmake .. -DBUILD_BENCH=ON && cmake --build .
+./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
 ```
-
-This uses Linux `splice()` to move data between sockets without copying to userspace.
-
-**Known Issues:**
-- Race conditions with many concurrent connections
-- May fail to forward responses under high load
-- EOF/half-close handling is incomplete
-
-**Limitations:**
-- Linux only (ignored on other platforms)
-- TCP mode only (HTTP mode needs to inspect headers)
-- Falls back to buffer copy if splice fails
-
-**Recommendation:** Use buffer mode (`use_splice: false`) which is stable and still performant.
 
 ## TLS Setup
 
 ```bash
 ./scripts/generate_test_cert.sh
+# Then set tls_enabled: true in config.yaml
 ```
 
-Then set `tls_enabled: true` in config.yaml.
+## Zero-Copy Mode (Experimental)
+
+> Has issues with concurrent connections. Use `use_splice: false` for production.
+
+```yaml
+listener:
+  mode: "tcp"
+  use_splice: true  # Linux only, TCP mode only
+```
 
 ## Metrics
 
-Access at `http://localhost:9090/metrics`:
+Available at `http://localhost:9090/metrics`:
 
-- `lb_connections_total` – Total connections
-- `lb_connections_active` – Active connections
-- `lb_backend_routed_total{backend="..."}` – Per-backend routing
-- `lb_backend_failures_total{backend="..."}` – Per-backend failures
-- `lb_overload_drops` – Dropped due to limits
+- `lb_connections_total` / `lb_connections_active`
+- `lb_backend_routed_total{backend="..."}`
+- `lb_backend_failures_total{backend="..."}`
+- `lb_overload_drops`

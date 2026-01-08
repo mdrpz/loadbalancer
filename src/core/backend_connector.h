@@ -5,6 +5,7 @@
 #include <memory>
 #include <unordered_map>
 #include "core/backend_pool.h"
+#include "core/connection_pool.h"
 #include "net/connection.h"
 #include "net/epoll_reactor.h"
 
@@ -25,6 +26,15 @@ public:
 
     void connect(std::unique_ptr<net::Connection> client_conn, int retry_count);
 
+    void set_pool_manager(ConnectionPoolManager* pool_manager);
+
+    struct BackendInfo {
+        std::string host;
+        uint16_t port;
+        bool pooled;
+    };
+    BackendInfo get_backend_info(int backend_fd) const;
+
 private:
     std::unordered_map<int, std::unique_ptr<net::Connection>>& connections_;
     std::unordered_map<int, std::weak_ptr<BackendNode>>& backend_connections_;
@@ -37,6 +47,9 @@ private:
     std::function<void(int, net::EventType)> client_handler_;
     std::function<void(int, net::EventType)> backend_handler_;
     std::function<void(std::unique_ptr<net::Connection>, int)> retry_callback_;
+
+    ConnectionPoolManager* pool_manager_ = nullptr;
+    std::unordered_map<int, BackendInfo> pooled_connections_;
 };
 
 } // namespace lb::core

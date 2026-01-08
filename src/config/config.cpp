@@ -23,6 +23,11 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->routing_algorithm = "round_robin";
     config_->max_connections_per_backend = 100;
     config_->max_global_connections = 1000;
+    config_->connection_pool_enabled = true;
+    config_->pool_min_connections = 0;
+    config_->pool_max_connections = 10;
+    config_->pool_idle_timeout_ms = 60000;
+    config_->pool_connect_timeout_ms = 5000;
     config_->health_check_interval_ms = 5000;
     config_->health_check_timeout_ms = 500;
     config_->health_check_failure_threshold = 3;
@@ -127,6 +132,20 @@ bool ConfigManager::load_from_file(const std::string& path) {
             if (routing["max_global_connections"])
                 new_config->max_global_connections =
                     routing["max_global_connections"].as<uint32_t>();
+        }
+
+        if (config["connection_pool"]) {
+            const auto& pool = config["connection_pool"];
+            if (pool["enabled"])
+                new_config->connection_pool_enabled = pool["enabled"].as<bool>();
+            if (pool["min_connections"])
+                new_config->pool_min_connections = pool["min_connections"].as<uint32_t>();
+            if (pool["max_connections"])
+                new_config->pool_max_connections = pool["max_connections"].as<uint32_t>();
+            if (pool["idle_timeout_ms"])
+                new_config->pool_idle_timeout_ms = pool["idle_timeout_ms"].as<uint32_t>();
+            if (pool["connect_timeout_ms"])
+                new_config->pool_connect_timeout_ms = pool["connect_timeout_ms"].as<uint32_t>();
         }
 
         if (config["health_check"]) {

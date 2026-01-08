@@ -33,6 +33,18 @@ BackendConnector::BackendConnector(
       backend_handler_(std::move(std::move(backend_handler))),
       retry_callback_(std::move(std::move(retry_callback))) {}
 
+void BackendConnector::set_pool_manager(ConnectionPoolManager* pool_manager) {
+    pool_manager_ = pool_manager;
+}
+
+BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd) const {
+    auto it = pooled_connections_.find(backend_fd);
+    if (it != pooled_connections_.end()) {
+        return it->second;
+    }
+    return {"", 0, false};
+}
+
 void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int retry_count) {
     auto backend_node = backend_pool_.select_backend(max_connections_per_backend_);
     if (!backend_node) {
@@ -42,8 +54,48 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
         return;
     }
 
-    lb::logging::Logger::instance().debug("Routing connection to backend " + backend_node->host() +
-                                          ":" + std::to_string(backend_node->port()));
+    const std::string& host = backend_node->host();
+    uint16_t port = backend_node->port();
+
+    lb::logging::Logger::instance().debug("Routing connection to backend " + host + ":" +
+                                          std::to_string(port));
+
+    std::ostringstream backend_str;
+    backend_str << host << ":" << port;
+    std::string backend_key = backend_str.str();
+
+    if (pool_manager_) {
+        auto pooled_backend = pool_manager_->borrow(host, port);
+        if (pooled_backend) {
+            lb::logging::Logger::instance().debug("Using pooled connection to " + backend_key);
+
+            int backend_fd = pooled_backend->fd();
+
+            client_conn->set_peer(pooled_backend.get());
+            pooled_backend->set_peer(client_conn.get());
+
+            pooled_connections_[backend_fd] = {host, port, true};
+
+            backend_node->increment_connections();
+            lb::metrics::Metrics::instance().increment_backend_routed(backend_key);
+            lb::metrics::Metrics::instance().increment_connections_active();
+
+            int client_fd = client_conn->fd();
+            connections_[client_fd] = std::move(client_conn);
+            connections_[backend_fd] = std::move(pooled_backend);
+
+            backend_connections_[backend_fd] = backend_node;
+            connection_times_[backend_fd] = std::chrono::steady_clock::now();
+            backend_to_client_map_[backend_fd] = client_fd;
+            client_retry_counts_[client_fd] = retry_count;
+
+            reactor_.add_fd(client_fd, EPOLLIN | EPOLLOUT,
+                            [this](int fd, net::EventType type) { client_handler_(fd, type); });
+            reactor_.add_fd(backend_fd, EPOLLIN | EPOLLOUT,
+                            [this](int fd, net::EventType type) { backend_handler_(fd, type); });
+            return;
+        }
+    }
 
     int backend_fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
     if (backend_fd < 0) {
@@ -58,13 +110,11 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(backend_node->port());
+    addr.sin_port = htons(port);
 
-    if (inet_pton(AF_INET, backend_node->host().c_str(), &addr.sin_addr) <= 0) {
+    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) <= 0) {
         backend_node->increment_failures();
-        std::ostringstream backend_str;
-        backend_str << backend_node->host() << ":" << backend_node->port();
-        lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
+        lb::metrics::Metrics::instance().increment_backend_failures(backend_key);
         client_conn->close();
         ::close(backend_fd);
         return;
@@ -76,9 +126,7 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
 
     if (result < 0 && errno != EINPROGRESS) {
         backend_node->increment_failures();
-        std::ostringstream backend_str;
-        backend_str << backend_node->host() << ":" << backend_node->port();
-        lb::metrics::Metrics::instance().increment_backend_failures(backend_str.str());
+        lb::metrics::Metrics::instance().increment_backend_failures(backend_key);
         backend_conn->close();
         ::close(backend_fd);
 
@@ -89,9 +137,7 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     client_conn->set_peer(backend_conn.get());
     backend_conn->set_peer(client_conn.get());
 
-    std::ostringstream backend_str;
-    backend_str << backend_node->host() << ":" << backend_node->port();
-    std::string backend_key = backend_str.str();
+    pooled_connections_[backend_fd] = {host, port, false};
 
     if (result == 0) {
         backend_conn->set_state(net::ConnectionState::ESTABLISHED);

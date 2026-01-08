@@ -1,7 +1,7 @@
 listener:
   host: "0.0.0.0"
   port: 8080
-  mode: "tcp"              # "tcp" or "http"
+  mode: "http"              # "tcp" or "http"
   use_splice: false         # Zero-copy mode (TCP only, Linux, experimental)
   tls_enabled: false
   tls_cert: "certs/server.crt"
@@ -9,12 +9,19 @@ listener:
 
 backends:
   - host: "127.0.0.1"
-    port: 80 # backend server port (nginx uses 80 and http.server uses 8000)
+    port: 80  # nginx default port (use 8000 for python http.server)
 
 routing:
   algorithm: "round_robin"
   max_connections_per_backend: 100
   max_global_connections: 1000
+
+connection_pool:
+  enabled: true              # Enable connection pooling for backend connections
+  min_connections: 0         # Minimum idle connections per backend
+  max_connections: 10        # Maximum pooled connections per backend
+  idle_timeout_ms: 60000     # Close idle connections after 60s
+  connect_timeout_ms: 5000   # Timeout for new pool connections
 
 health_check:
   interval_ms: 5000

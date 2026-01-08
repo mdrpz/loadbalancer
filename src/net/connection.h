@@ -48,6 +48,11 @@ public:
         return write_buf_;
     }
 
+    void clear_buffers() {
+        read_buf_.clear();
+        write_buf_.clear();
+    }
+
     void close();
 
     void set_ssl(SSL* ssl) {

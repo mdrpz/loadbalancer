@@ -9,6 +9,7 @@
 #include "core/backend_pool.h"
 #include "core/backpressure_manager.h"
 #include "core/connection_manager.h"
+#include "core/connection_pool.h"
 #include "core/data_forwarder.h"
 #include "core/event_handlers.h"
 #include "core/http_data_forwarder.h"
@@ -74,12 +75,14 @@ private:
     uint32_t connection_timeout_seconds_;
 
     std::unique_ptr<ConnectionManager> connection_manager_;
+    std::unique_ptr<ConnectionPoolManager> pool_manager_;
     std::unique_ptr<EventHandlers> event_handlers_;
     std::unique_ptr<BackendConnector> backend_connector_;
     std::unique_ptr<DataForwarder> data_forwarder_;
     std::unique_ptr<SpliceForwarder> splice_forwarder_;
     std::unique_ptr<HttpDataForwarder> http_data_forwarder_;
     bool use_splice_ = false;
+    bool pool_enabled_ = true;
     std::unique_ptr<BackpressureManager> backpressure_manager_;
     std::unique_ptr<RetryHandler> retry_handler_;
 

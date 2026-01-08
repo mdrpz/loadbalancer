@@ -34,6 +34,7 @@ add_library(lb_lib STATIC
     src/core/backend_node.cpp
     src/core/load_balancer.cpp
     src/core/connection_manager.cpp
+    src/core/connection_pool.cpp
     src/core/event_handlers.cpp
     src/core/backend_connector.cpp
     src/core/data_forwarder.cpp

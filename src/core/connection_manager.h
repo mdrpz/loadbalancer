@@ -26,6 +26,10 @@ public:
     void close_connection(int fd);
     void close_backend_connection_only(int backend_fd);
 
+    using PoolReleaseCallback =
+        std::function<bool(int backend_fd, std::unique_ptr<net::Connection> conn)>;
+    void set_pool_release_callback(PoolReleaseCallback callback);
+
 private:
     std::unordered_map<int, std::unique_ptr<net::Connection>>& connections_;
     std::unordered_map<int, std::weak_ptr<BackendNode>>& backend_connections_;
@@ -34,6 +38,7 @@ private:
     std::unordered_map<int, int>& client_retry_counts_;
     std::unordered_map<int, int>& backend_to_client_map_;
     net::EpollReactor& reactor_;
+    PoolReleaseCallback pool_release_callback_;
 };
 
 } // namespace lb::core
