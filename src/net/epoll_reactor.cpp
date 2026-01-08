@@ -96,7 +96,7 @@ void EpollReactor::run() {
             }
             if (ev & EPOLLIN) {
                 it->second(fd, EventType::READ);
-                it = callbacks_.find(fd); // Re-check
+                it = callbacks_.find(fd);
                 if (it == callbacks_.end())
                     continue;
             }

@@ -53,7 +53,7 @@ private:
     std::unique_ptr<net::TcpListener> listener_;
     std::unique_ptr<BackendPool> backend_pool_;
     std::unique_ptr<lb::health::HealthChecker> health_checker_;
-    std::unique_ptr<lb::tls::TlsContext> tls_context_; // TLS context (nullptr if TLS disabled)
+    std::unique_ptr<lb::tls::TlsContext> tls_context_;
 
     std::unordered_map<int, std::unique_ptr<net::Connection>> connections_;
 

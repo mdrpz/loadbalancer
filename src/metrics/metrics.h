@@ -26,7 +26,6 @@ public:
     uint64_t get_backend_routes_failed() const;
     uint64_t get_overload_drops() const;
 
-    // Export as Prometheus format
     std::string export_prometheus() const;
 
 private:
@@ -38,7 +37,6 @@ private:
     std::atomic<uint64_t> backend_routes_failed_{0};
     std::atomic<uint64_t> overload_drops_{0};
 
-    // Per-backend metrics
     mutable std::mutex backend_metrics_mutex_;
     std::unordered_map<std::string, std::atomic<uint64_t>> backend_routed_;
     std::unordered_map<std::string, std::atomic<uint64_t>> backend_failures_;
