@@ -13,6 +13,7 @@
 #include "core/event_handlers.h"
 #include "core/http_data_forwarder.h"
 #include "core/retry_handler.h"
+#include "core/splice_forwarder.h"
 #include "health/health_checker.h"
 #include "net/connection.h"
 #include "net/epoll_reactor.h"
@@ -76,7 +77,9 @@ private:
     std::unique_ptr<EventHandlers> event_handlers_;
     std::unique_ptr<BackendConnector> backend_connector_;
     std::unique_ptr<DataForwarder> data_forwarder_;
+    std::unique_ptr<SpliceForwarder> splice_forwarder_;
     std::unique_ptr<HttpDataForwarder> http_data_forwarder_;
+    bool use_splice_ = false;
     std::unique_ptr<BackpressureManager> backpressure_manager_;
     std::unique_ptr<RetryHandler> retry_handler_;
 

@@ -26,10 +26,14 @@ public:
                   std::function<void(net::Connection*, net::Connection*)> forward_data,
                   std::function<void(int)> clear_backpressure,
                   std::function<void(std::unique_ptr<net::Connection>, int)> retry,
-                  std::function<void(int)> on_tls_handshake_complete);
+                  std::function<void(int)> on_tls_handshake_complete, bool use_splice = false);
 
     void handle_client_event(int fd, net::EventType type);
     void handle_backend_event(int fd, net::EventType type);
+
+    void set_splice_mode(bool enabled) {
+        use_splice_ = enabled;
+    }
 
 private:
     bool handle_tls_handshake(net::Connection* conn, int fd);
@@ -49,6 +53,7 @@ private:
     std::function<void(int)> clear_backpressure_;
     std::function<void(std::unique_ptr<net::Connection>, int)> retry_;
     std::function<void(int)> on_tls_handshake_complete_;
+    bool use_splice_;
 
     bool try_retry_on_backend_error(int backend_fd);
 };

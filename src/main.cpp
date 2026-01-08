@@ -23,6 +23,7 @@ void signal_handler(int sig) {
 int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);
     std::signal(SIGTERM, signal_handler);
+    std::signal(SIGPIPE, SIG_IGN);
 
     lb::config::ConfigManager config_manager;
     std::string config_path;

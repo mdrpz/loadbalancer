@@ -50,7 +50,7 @@ Changes auto-reload every 5 seconds.
 ```bash
 cd tests/python
 pip install -r requirements.txt
-python3 -m pytest -v
+python3 -m pytest -v -s
 ```
 
 **Test coverage:** Round-robin, least-connections, health checks, connection handling, config hot reload, graceful shutdown, TLS termination
@@ -157,6 +157,32 @@ Hot Reload: Config changes apply without restart
 Metrics: Prometheus endpoint at `:9090/metrics`
 
 Routing: Round-robin or least-connections
+
+## Zero-Copy Mode
+
+> **WARNING**: Zero-copy splice mode is experimental and has issues with concurrent connections.
+
+For TCP-only workloads, you can try zero-copy forwarding:
+
+```yaml
+listener:
+  mode: "tcp"
+  use_splice: true
+```
+
+This uses Linux `splice()` to move data between sockets without copying to userspace.
+
+**Known Issues:**
+- Race conditions with many concurrent connections
+- May fail to forward responses under high load
+- EOF/half-close handling is incomplete
+
+**Limitations:**
+- Linux only (ignored on other platforms)
+- TCP mode only (HTTP mode needs to inspect headers)
+- Falls back to buffer copy if splice fails
+
+**Recommendation:** Use buffer mode (`use_splice: false`) which is stable and still performant.
 
 ## TLS Setup
 

@@ -1,14 +1,15 @@
 listener:
   host: "0.0.0.0"
   port: 8080
-  mode: "http"
+  mode: "tcp"              # "tcp" or "http"
+  use_splice: false         # Zero-copy mode (TCP only, Linux, experimental)
   tls_enabled: false
   tls_cert: "certs/server.crt"
   tls_key: "certs/server.key"
 
 backends:
   - host: "127.0.0.1"
-    port: 80
+    port: 80 # backend server port (nginx uses 80 and http.server uses 8000)
 
 routing:
   algorithm: "round_robin"
@@ -30,5 +31,5 @@ metrics:
   port: 9090
 
 logging:
-  level: "info"
+  level: "debug"
   file: "/tmp/lb.log"

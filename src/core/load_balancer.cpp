@@ -13,6 +13,7 @@
 #include "config/config.h"
 #include "core/backend_node.h"
 #include "core/http_data_forwarder.h"
+#include "core/splice_forwarder.h"
 #include "health/health_checker.h"
 #include "logging/logger.h"
 #include "metrics/metrics.h"
@@ -62,12 +63,17 @@ LoadBalancer::LoadBalancer()
                     tls_context_->destroy_ssl(ssl);
                 }
             }
+            if (splice_forwarder_) {
+                splice_forwarder_->cleanup(fd);
+            }
             connection_manager_->close_connection(fd);
         },
         [this](int fd) { connection_manager_->close_backend_connection_only(fd); },
         [this](net::Connection* from, net::Connection* to) {
             if (mode_ == "http" && http_data_forwarder_) {
                 http_data_forwarder_->forward(from, to);
+            } else if (use_splice_ && splice_forwarder_) {
+                splice_forwarder_->forward(from, to);
             } else {
                 data_forwarder_->forward(from, to);
             }
@@ -206,6 +212,22 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
             },
             tls_context_ && tls_context_->is_initialized());
         lb::logging::Logger::instance().info("HTTP mode enabled");
+    }
+
+    use_splice_ = config->use_splice && mode_ == "tcp";
+    if (use_splice_) {
+        if (SpliceForwarder::is_available()) {
+            splice_forwarder_ = std::make_unique<SpliceForwarder>(
+                *reactor_, [this](int fd) { backpressure_manager_->start_tracking(fd); },
+                [this](int fd) { backpressure_manager_->clear_tracking(fd); },
+                [this](int fd) { connection_manager_->close_connection(fd); });
+            event_handlers_->set_splice_mode(true);
+            lb::logging::Logger::instance().info("Zero-copy splice mode enabled");
+        } else {
+            lb::logging::Logger::instance().warn(
+                "Splice requested but not available on this system, using buffer copy");
+            use_splice_ = false;
+        }
     }
 
     if (config->tls_enabled) {

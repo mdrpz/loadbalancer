@@ -21,6 +21,7 @@ struct Config {
     std::string tls_key_path;
 
     std::string mode; // "tcp" or "http"
+    bool use_splice;  // Use zero-copy splice() for TCP mode (Linux only)
 
     std::vector<BackendConfig> backends;
 

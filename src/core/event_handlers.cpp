@@ -24,7 +24,7 @@ EventHandlers::EventHandlers(
     std::function<void(net::Connection*, net::Connection*)> forward_data,
     std::function<void(int)> clear_backpressure,
     std::function<void(std::unique_ptr<net::Connection>, int)> retry,
-    std::function<void(int)> on_tls_handshake_complete)
+    std::function<void(int)> on_tls_handshake_complete, bool use_splice)
     : connections_(connections), backend_connections_(backend_connections),
       connection_times_(connection_times), backend_to_client_map_(backend_to_client_map),
       client_retry_counts_(client_retry_counts), reactor_(reactor),
@@ -36,10 +36,9 @@ EventHandlers::EventHandlers(
       forward_data_(std::move(std::move(forward_data))),
       clear_backpressure_(std::move(std::move(clear_backpressure))),
       retry_(std::move(std::move(retry))),
-      on_tls_handshake_complete_(std::move(on_tls_handshake_complete)) {}
+      on_tls_handshake_complete_(std::move(on_tls_handshake_complete)), use_splice_(use_splice) {}
 
 bool EventHandlers::try_retry_on_backend_error(int backend_fd) {
-    // Get client connection for retry
     auto client_it = backend_to_client_map_.find(backend_fd);
     if (client_it == backend_to_client_map_.end())
         return false;
@@ -88,6 +87,12 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
     if (type == net::EventType::READ) {
         if (conn->state() != net::ConnectionState::ESTABLISHED)
             return;
+
+        if (use_splice_ && conn->peer() &&
+            conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+            forward_data_(conn, conn->peer());
+            return;
+        }
 
         bool read_success = conn->read_from_fd();
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
@@ -224,6 +229,12 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
     if (type == net::EventType::READ) {
         if (conn->state() != net::ConnectionState::ESTABLISHED)
             return;
+
+        if (use_splice_ && conn->peer() &&
+            conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+            forward_data_(conn, conn->peer());
+            return;
+        }
 
         bool read_success = conn->read_from_fd();
 

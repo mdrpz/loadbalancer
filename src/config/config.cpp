@@ -19,6 +19,7 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->listen_port = 8080;
     config_->tls_enabled = false;
     config_->mode = "tcp";
+    config_->use_splice = false;
     config_->routing_algorithm = "round_robin";
     config_->max_connections_per_backend = 100;
     config_->max_global_connections = 1000;
@@ -101,6 +102,8 @@ bool ConfigManager::load_from_file(const std::string& path) {
             }
             if (listener["mode"])
                 new_config->mode = listener["mode"].as<std::string>();
+            if (listener["use_splice"])
+                new_config->use_splice = listener["use_splice"].as<bool>();
         }
 
         if (config["backends"] && config["backends"].IsSequence()) {

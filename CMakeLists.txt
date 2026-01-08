@@ -49,6 +49,7 @@ add_library(lb_lib STATIC
     src/http/http_response.cpp
     src/http/http_handler.cpp
     src/core/http_data_forwarder.cpp
+    src/core/splice_forwarder.cpp
 )
 
 target_link_libraries(lb_lib
