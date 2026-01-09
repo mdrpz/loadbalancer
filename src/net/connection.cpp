@@ -54,8 +54,10 @@ bool Connection::read_from_fd() {
         }
     }
     read_buf_.resize(old_size + n);
+    bytes_read_ += n;
     return true;
 }
+
 bool Connection::write_to_fd() {
     if (write_buf_.empty())
         return true;
@@ -74,6 +76,7 @@ bool Connection::write_to_fd() {
         }
     }
     write_buf_.erase(write_buf_.begin(), write_buf_.begin() + n);
+    bytes_written_ += n;
     return true;
 }
 void Connection::close() {

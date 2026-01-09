@@ -1,4 +1,5 @@
 #include "metrics/metrics.h"
+#include <iomanip>
 #include <mutex>
 #include <sstream>
 
@@ -39,6 +40,32 @@ void Metrics::increment_overload_drops() {
     overload_drops_++;
 }
 
+void Metrics::increment_request_timeouts() {
+    request_timeouts_++;
+}
+
+void Metrics::add_bytes_in(uint64_t bytes) {
+    bytes_in_ += bytes;
+}
+
+void Metrics::add_bytes_out(uint64_t bytes) {
+    bytes_out_ += bytes;
+}
+
+void Metrics::record_request_latency_ms(double latency_ms) {
+    for (size_t i = 0; i < LATENCY_BUCKETS.size(); ++i) {
+        if (latency_ms <= LATENCY_BUCKETS[i]) {
+            latency_bucket_counts_[i]++;
+        }
+    }
+    latency_bucket_counts_[LATENCY_BUCKETS.size()]++;
+    latency_count_++;
+
+    double current = latency_sum_.load();
+    while (!latency_sum_.compare_exchange_weak(current, current + latency_ms)) {
+    }
+}
+
 uint64_t Metrics::get_connections_total() const {
     return connections_total_.load();
 }
@@ -67,40 +94,78 @@ uint64_t Metrics::get_overload_drops() const {
     return overload_drops_.load();
 }
 
+uint64_t Metrics::get_request_timeouts() const {
+    return request_timeouts_.load();
+}
+
+uint64_t Metrics::get_bytes_in() const {
+    return bytes_in_.load();
+}
+
+uint64_t Metrics::get_bytes_out() const {
+    return bytes_out_.load();
+}
+
 std::string Metrics::export_prometheus() const {
     std::ostringstream oss;
+    oss << std::fixed << std::setprecision(3);
 
     oss << "# HELP lb_connections_total Total number of connections accepted\n";
     oss << "# TYPE lb_connections_total counter\n";
-    oss << "lb_connections_total " << get_connections_total() << "\n";
+    oss << "lb_connections_total " << get_connections_total() << "\n\n";
 
     oss << "# HELP lb_connections_active Current number of active connections\n";
     oss << "# TYPE lb_connections_active gauge\n";
-    oss << "lb_connections_active " << get_connections_active() << "\n";
+    oss << "lb_connections_active " << get_connections_active() << "\n\n";
 
-    oss << "# HELP lb_backend_routes_failed_total Total number of connections that failed to route "
-           "to any backend\n";
+    oss << "# HELP lb_backend_routes_failed_total Connections failed to route to any backend\n";
     oss << "# TYPE lb_backend_routes_failed_total counter\n";
-    oss << "lb_backend_routes_failed_total " << get_backend_routes_failed() << "\n";
+    oss << "lb_backend_routes_failed_total " << get_backend_routes_failed() << "\n\n";
 
-    oss << "# HELP lb_overload_drops Total number of connections dropped due to overload\n";
-    oss << "# TYPE lb_overload_drops counter\n";
-    oss << "lb_overload_drops " << get_overload_drops() << "\n";
+    oss << "# HELP lb_overload_drops_total Connections dropped due to overload\n";
+    oss << "# TYPE lb_overload_drops_total counter\n";
+    oss << "lb_overload_drops_total " << get_overload_drops() << "\n\n";
+
+    oss << "# HELP lb_request_timeouts_total Requests that timed out\n";
+    oss << "# TYPE lb_request_timeouts_total counter\n";
+    oss << "lb_request_timeouts_total " << get_request_timeouts() << "\n\n";
+
+    oss << "# HELP lb_bytes_received_total Total bytes received from clients\n";
+    oss << "# TYPE lb_bytes_received_total counter\n";
+    oss << "lb_bytes_received_total " << get_bytes_in() << "\n\n";
+
+    oss << "# HELP lb_bytes_sent_total Total bytes sent to clients\n";
+    oss << "# TYPE lb_bytes_sent_total counter\n";
+    oss << "lb_bytes_sent_total " << get_bytes_out() << "\n\n";
+
+    oss << "# HELP lb_request_duration_ms Request latency in milliseconds\n";
+    oss << "# TYPE lb_request_duration_ms histogram\n";
+    uint64_t cumulative = 0;
+    for (size_t i = 0; i < LATENCY_BUCKETS.size(); ++i) {
+        cumulative += latency_bucket_counts_[i].load();
+        oss << "lb_request_duration_ms_bucket{le=\"" << LATENCY_BUCKETS[i] << "\"} " << cumulative
+            << "\n";
+    }
+    oss << "lb_request_duration_ms_bucket{le=\"+Inf\"} "
+        << latency_bucket_counts_[LATENCY_BUCKETS.size()].load() << "\n";
+    oss << "lb_request_duration_ms_sum " << latency_sum_.load() << "\n";
+    oss << "lb_request_duration_ms_count " << latency_count_.load() << "\n\n";
 
     {
         std::lock_guard<std::mutex> lock(backend_metrics_mutex_);
 
-        oss << "# HELP lb_backend_routed_total Total connections routed to backend\n";
-        oss << "# TYPE lb_backend_routed_total counter\n";
+        oss << "# HELP lb_backend_requests_total Total requests routed to backend\n";
+        oss << "# TYPE lb_backend_requests_total counter\n";
         for (const auto& [backend, count] : backend_routed_) {
-            oss << "lb_backend_routed_total{backend=\"" << backend << "\"} " << count.load()
+            oss << "lb_backend_requests_total{backend=\"" << backend << "\"} " << count.load()
                 << "\n";
         }
+        oss << "\n";
 
-        oss << "# HELP lb_backend_failures_total Total backend failures\n";
-        oss << "# TYPE lb_backend_failures_total counter\n";
+        oss << "# HELP lb_backend_errors_total Total backend connection errors\n";
+        oss << "# TYPE lb_backend_errors_total counter\n";
         for (const auto& [backend, count] : backend_failures_) {
-            oss << "lb_backend_failures_total{backend=\"" << backend << "\"} " << count.load()
+            oss << "lb_backend_errors_total{backend=\"" << backend << "\"} " << count.load()
                 << "\n";
         }
     }

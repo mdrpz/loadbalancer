@@ -37,6 +37,8 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->metrics_enabled = true;
     config_->metrics_port = 9090;
     config_->log_level = "info";
+    config_->access_log_enabled = false;
+    config_->request_timeout_ms = 30000;
     config_->global_buffer_budget_mb = 512;
     config_->backpressure_timeout_ms = 10000;
     config_->graceful_shutdown_timeout_seconds = 30;
@@ -186,6 +188,16 @@ bool ConfigManager::load_from_file(const std::string& path) {
                 new_config->log_level = logging["level"].as<std::string>();
             if (logging["file"])
                 new_config->log_file = logging["file"].as<std::string>();
+            if (logging["access_log_enabled"])
+                new_config->access_log_enabled = logging["access_log_enabled"].as<bool>();
+            if (logging["access_log_file"])
+                new_config->access_log_file = logging["access_log_file"].as<std::string>();
+        }
+
+        if (config["timeouts"]) {
+            const auto& timeouts = config["timeouts"];
+            if (timeouts["request_ms"])
+                new_config->request_timeout_ms = timeouts["request_ms"].as<uint32_t>();
         }
 
         if (config["memory"]) {

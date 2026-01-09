@@ -59,6 +59,13 @@ routing:
 connection_pool:
   enabled: true             # Reuse backend connections
   max_connections: 10       # Per backend
+
+logging:
+  access_log_enabled: true
+  access_log_file: "/var/log/lb_access.log"
+
+timeouts:
+  request_ms: 30000 
 ```
 
 ## Features
@@ -70,6 +77,7 @@ connection_pool:
 - **Connection Pooling** - Reuses backend connections (-36% p95 latency)
 - **Routing** - Round-robin, least-connections, weighted
 - **Metrics** - Prometheus endpoint at `:9090/metrics`
+- **Access Logging** - Combined log format (like nginx)
 
 ## Architecture
 
@@ -124,12 +132,19 @@ listener:
 
 ## Metrics
 
-Available at `http://localhost:9090/metrics`:
+Prometheus endpoint at `http://localhost:9090/metrics`:
 
-- `lb_connections_total` / `lb_connections_active`
-- `lb_backend_routed_total{backend="..."}`
-- `lb_backend_failures_total{backend="..."}`
-- `lb_overload_drops`
+| Metric | Type | Description |
+|--------|------|-------------|
+| `lb_connections_total` | counter | Total connections accepted |
+| `lb_connections_active` | gauge | Current active connections |
+| `lb_bytes_received_total` | counter | Total bytes from clients |
+| `lb_bytes_sent_total` | counter | Total bytes to clients |
+| `lb_request_duration_ms_bucket` | histogram | Request latency distribution |
+| `lb_backend_requests_total{backend="..."}` | counter | Requests per backend |
+| `lb_backend_errors_total{backend="..."}` | counter | Errors per backend |
+| `lb_request_timeouts_total` | counter | Timed out requests |
+| `lb_overload_drops_total` | counter | Dropped due to overload |
 
 ## Troubleshooting
 

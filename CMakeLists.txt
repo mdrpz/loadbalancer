@@ -46,6 +46,7 @@ add_library(lb_lib STATIC
     src/metrics/metrics_server.cpp
     src/tls/tls_context.cpp
     src/logging/logger.cpp
+    src/logging/access_logger.cpp
     src/http/http_request.cpp
     src/http/http_response.cpp
     src/http/http_handler.cpp

@@ -5,6 +5,7 @@
 #include <thread>
 #include "config/config.h"
 #include "core/load_balancer.h"
+#include "logging/access_logger.h"
 #include "logging/logger.h"
 #include "metrics/metrics_server.h"
 
@@ -62,6 +63,15 @@ int main(int argc, char* argv[]) {
     }
     logger.start();
     logger.info("Load balancer starting");
+
+    auto& access_logger = lb::logging::AccessLogger::instance();
+    if (config && config->access_log_enabled) {
+        access_logger.set_enabled(true);
+        if (!config->access_log_file.empty())
+            access_logger.set_output_file(config->access_log_file);
+        access_logger.start();
+        logger.info("Access logging enabled");
+    }
 
     lb::core::LoadBalancer lb;
     g_lb = &lb;
@@ -160,6 +170,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "Load Balancer shutting down...\n";
     logger.info("Load balancer shutting down");
+    access_logger.stop();
     logger.stop();
     return 0;
 }

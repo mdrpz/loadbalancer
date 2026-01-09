@@ -42,5 +42,10 @@ metrics:
   port: 9090
 
 logging:
-  level: "debug"
+  level: "info"
   file: "/tmp/lb.log"
+  access_log_enabled: true
+  access_log_file: "/tmp/lb_access.log"
+
+timeouts:
+  request_ms: 30000

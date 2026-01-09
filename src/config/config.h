@@ -50,6 +50,11 @@ struct Config {
     std::string log_level;
     std::string log_file;
 
+    bool access_log_enabled;
+    std::string access_log_file;
+
+    uint32_t request_timeout_ms;
+
     uint32_t global_buffer_budget_mb;
 
     uint32_t backpressure_timeout_ms;

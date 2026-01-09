@@ -65,6 +65,13 @@ public:
         return ssl_ != nullptr;
     }
 
+    [[nodiscard]] size_t bytes_read() const {
+        return bytes_read_;
+    }
+    [[nodiscard]] size_t bytes_written() const {
+        return bytes_written_;
+    }
+
 private:
     int fd_;
     ConnectionState state_;
@@ -74,6 +81,9 @@ private:
     static constexpr size_t MAX_BUFFER_SIZE = 64 * 1024;
     std::vector<uint8_t> read_buf_;
     std::vector<uint8_t> write_buf_;
+
+    size_t bytes_read_{0};
+    size_t bytes_written_{0};
 };
 
 } // namespace lb::net

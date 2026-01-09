@@ -73,6 +73,9 @@ void ConnectionManager::close_connection(int fd) {
         backend_connections_.erase(backend_it);
     }
 
+    lb::metrics::Metrics::instance().add_bytes_in(conn->bytes_read());
+    lb::metrics::Metrics::instance().add_bytes_out(conn->bytes_written());
+
     if (is_client_connection) {
         lb::metrics::Metrics::instance().decrement_connections_active();
         lb::logging::Logger::instance().debug("Client connection closed (fd=" + std::to_string(fd) +
