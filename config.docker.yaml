@@ -1,0 +1,36 @@
+listener:
+  host: "0.0.0.0"
+  port: 8080
+  mode: "http"
+  tls_enabled: false
+
+backends:
+  - host: "backend1"
+    port: 80
+    weight: 1
+  - host: "backend2"
+    port: 80
+    weight: 1
+
+routing:
+  algorithm: "round_robin"
+  max_connections_per_backend: 100
+  max_global_connections: 1000
+
+connection_pool:
+  enabled: true
+  max_connections: 10
+
+health_check:
+  interval_ms: 5000
+  timeout_ms: 2000
+  failure_threshold: 5
+  success_threshold: 1
+  type: "tcp"
+
+metrics:
+  enabled: true
+  port: 9090
+
+logging:
+  level: "info"

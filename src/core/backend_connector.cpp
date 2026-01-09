@@ -1,6 +1,7 @@
 #include "core/backend_connector.h"
 #include <arpa/inet.h>
 #include <errno.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <sys/socket.h>
@@ -108,11 +109,13 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
         std::cerr << "Failed to set socket option: " << strerror(errno) << std::endl;
     }
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    struct addrinfo hints {
+    }, *res = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
 
-    if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) <= 0) {
+    int gai_err = getaddrinfo(host.c_str(), std::to_string(port).c_str(), &hints, &res);
+    if (gai_err != 0 || !res) {
         backend_node->increment_failures();
         lb::metrics::Metrics::instance().increment_backend_failures(backend_key);
         client_conn->close();
@@ -120,7 +123,8 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
         return;
     }
 
-    int result = ::connect(backend_fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    int result = ::connect(backend_fd, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
 
     auto backend_conn = std::make_unique<net::Connection>(backend_fd);
 

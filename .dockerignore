@@ -1,0 +1,9 @@
+build/
+.git/
+.github/
+tests/
+bench/
+*.md
+.gitignore
+.clang-format
+.clang-tidy

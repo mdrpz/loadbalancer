@@ -1,6 +1,7 @@
 #include "core/connection_pool.h"
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -173,17 +174,21 @@ net::Connection* ConnectionPool::create_connection() {
 
     setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &flag, sizeof(flag));
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port_);
+    struct addrinfo hints {
+    }, *res = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
 
-    if (inet_pton(AF_INET, host_.c_str(), &addr.sin_addr) <= 0) {
-        lb::logging::Logger::instance().error("Pool: Invalid address: " + host_);
+    int gai_err = getaddrinfo(host_.c_str(), std::to_string(port_).c_str(), &hints, &res);
+    if (gai_err != 0 || !res) {
+        lb::logging::Logger::instance().error("Pool: Failed to resolve " + host_ + ": " +
+                                              gai_strerror(gai_err));
         ::close(fd);
         return nullptr;
     }
 
-    int result = connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    int result = connect(fd, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
     if (result < 0 && errno != EINPROGRESS) {
         lb::logging::Logger::instance().error("Pool: Connect failed to " + host_ + ":" +
                                               std::to_string(port_) + ": " + strerror(errno));

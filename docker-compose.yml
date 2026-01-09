@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  loadbalancer:
+    build: .
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    depends_on:
+      backend1:
+        condition: service_started
+      backend2:
+        condition: service_started
+    volumes:
+      - ./config.docker.yaml:/app/config.yaml:ro
+    restart: unless-stopped
+
+  backend1:
+    image: nginx:alpine
+    expose:
+      - "80"
+
+  backend2:
+    image: nginx:alpine
+    expose:
+      - "80"

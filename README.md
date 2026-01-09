@@ -20,6 +20,20 @@ python3 -m http.server 8000 &
 curl http://localhost:8080/
 ```
 
+## Docker
+
+```bash
+# Run with docker-compose (includes 2 nginx backends)
+docker-compose up --build
+
+# Test
+curl http://localhost:8080/
+
+# Or build image only
+docker build -t loadbalancer .
+docker run -p 8080:8080 -p 9090:9090 -v $(pwd)/config.yaml:/app/config.yaml loadbalancer
+```
+
 ## Configuration
 
 Edit `config.yaml` (auto-reloads every 5 seconds):

@@ -2,6 +2,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -82,17 +83,21 @@ bool HealthChecker::check_backend(const std::shared_ptr<lb::core::BackendNode>& 
         return false;
     }
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(backend->port());
+    struct addrinfo hints {
+    }, *res = nullptr;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
 
-    if (inet_pton(AF_INET, backend->host().c_str(), &addr.sin_addr) <= 0) {
+    int gai_err =
+        getaddrinfo(backend->host().c_str(), std::to_string(backend->port()).c_str(), &hints, &res);
+    if (gai_err != 0 || !res) {
         ::close(sock);
         update_backend_state(backend, false);
         return false;
     }
 
-    int result = connect(sock, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    int result = connect(sock, res->ai_addr, res->ai_addrlen);
+    freeaddrinfo(res);
     bool connected = false;
 
     if (result == 0) {
