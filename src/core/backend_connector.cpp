@@ -38,6 +38,10 @@ void BackendConnector::set_pool_manager(ConnectionPoolManager* pool_manager) {
     pool_manager_ = pool_manager;
 }
 
+void BackendConnector::set_backend_selected_callback(BackendSelectedCallback callback) {
+    backend_selected_callback_ = std::move(callback);
+}
+
 BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd) const {
     auto it = pooled_connections_.find(backend_fd);
     if (it != pooled_connections_.end()) {
@@ -89,6 +93,10 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
             connection_times_[backend_fd] = std::chrono::steady_clock::now();
             backend_to_client_map_[backend_fd] = client_fd;
             client_retry_counts_[client_fd] = retry_count;
+
+            if (backend_selected_callback_) {
+                backend_selected_callback_(client_fd, host, port);
+            }
 
             reactor_.add_fd(client_fd, EPOLLIN | EPOLLOUT,
                             [this](int fd, net::EventType type) { client_handler_(fd, type); });
@@ -164,6 +172,10 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
 
     backend_to_client_map_[backend_fd_stored] = client_fd;
     client_retry_counts_[client_fd] = retry_count;
+
+    if (backend_selected_callback_) {
+        backend_selected_callback_(client_fd, host, port);
+    }
 
     reactor_.add_fd(client_fd, EPOLLIN | EPOLLOUT,
                     [this](int fd, net::EventType type) { client_handler_(fd, type); });

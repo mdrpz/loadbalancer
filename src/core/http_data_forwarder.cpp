@@ -60,6 +60,17 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
             state.parser.reset();
             return;
         }
+    } else {
+        int client_fd = get_client_fd_ ? get_client_fd_(from_fd) : 0;
+        if (client_fd > 0) {
+            auto it = http_states_.find(client_fd);
+            if (it != http_states_.end() && it->second.request_info.status_code == 0) {
+                if (read_buf.size() >= 12 && read_buf[0] == 'H' && read_buf[1] == 'T' &&
+                    read_buf[2] == 'T' && read_buf[3] == 'P') {
+                    parse_response_status(client_fd, read_buf);
+                }
+            }
+        }
     }
 
     size_t available = to->write_available();
@@ -74,6 +85,22 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
     size_t to_copy = std::min(read_buf.size(), available);
     to->write_buffer().insert(to->write_buffer().end(), read_buf.begin(),
                               read_buf.begin() + to_copy);
+
+    if (is_http_request) {
+        auto it = http_states_.find(from_fd);
+        if (it != http_states_.end()) {
+            it->second.request_info.bytes_received += to_copy;
+        }
+    } else {
+        int client_fd = get_client_fd_ ? get_client_fd_(from_fd) : 0;
+        if (client_fd > 0) {
+            auto it = http_states_.find(client_fd);
+            if (it != http_states_.end()) {
+                it->second.request_info.bytes_sent += to_copy;
+            }
+        }
+    }
+
     read_buf.erase(read_buf.begin(), read_buf.begin() + to_copy);
 
     reactor_.mod_fd(to->fd(), EPOLLIN | EPOLLOUT);
@@ -82,6 +109,28 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
     if (!to->write_to_fd()) {
         close_connection_(to->fd());
         return;
+    }
+
+    if (!is_http_request) {
+        int client_fd = get_client_fd_ ? get_client_fd_(from_fd) : 0;
+        if (client_fd > 0) {
+            auto it = http_states_.find(client_fd);
+            if (it != http_states_.end() && it->second.request_info.status_code > 0) {
+                if (read_buf.empty() && !it->second.request_info.response_complete) {
+                    it->second.request_info.response_complete_time =
+                        std::chrono::system_clock::now();
+                    it->second.request_info.response_complete = true;
+
+                    if (access_log_callback_) {
+                        access_log_callback_(client_fd, it->second.request_info);
+
+                        it->second.request_info = RequestInfo{};
+                        it->second.request_parsed_ = false;
+                        it->second.parser.reset();
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -98,7 +147,14 @@ bool HttpDataForwarder::parse_and_modify_http_request(net::Connection* conn, int
         auto& request = const_cast<lb::http::HttpRequest&>(state.parser.request());
         std::string client_ip = get_client_ip_(fd);
         if (client_ip.empty())
-            client_ip = lb::http::HttpHandler::extract_client_ip(fd);
+            client_ip = "unknown";
+
+        state.request_info.method = lb::http::method_to_string(request.method);
+        state.request_info.path = request.path;
+        if (!request.query_string.empty())
+            state.request_info.path += "?" + request.query_string;
+        state.request_info.client_ip = client_ip;
+        state.request_info.start_time = std::chrono::system_clock::now();
 
         lb::http::HttpHandler::modify_request_headers(request, client_ip, is_https_);
 
@@ -133,6 +189,75 @@ std::vector<uint8_t> HttpDataForwarder::serialize_http_request(
 
     std::string str = oss.str();
     return std::vector<uint8_t>(str.begin(), str.end());
+}
+
+RequestInfo* HttpDataForwarder::get_request_info(int client_fd) {
+    auto it = http_states_.find(client_fd);
+    if (it != http_states_.end() && !it->second.request_info.method.empty()) {
+        return &it->second.request_info;
+    }
+    return nullptr;
+}
+
+void HttpDataForwarder::set_backend_for_request(int client_fd, const std::string& backend) {
+    auto it = http_states_.find(client_fd);
+    if (it != http_states_.end()) {
+        it->second.request_info.backend = backend;
+    }
+}
+
+void HttpDataForwarder::parse_response_status(int client_fd,
+                                              const std::vector<uint8_t>& response_data) {
+    auto it = http_states_.find(client_fd);
+    if (it == http_states_.end())
+        return;
+
+    if (it->second.request_info.status_code > 0)
+        return;
+
+    if (response_data.size() < 12)
+        return;
+
+    for (size_t i = 0; i < response_data.size() - 8; ++i) {
+        if (response_data[i] == 'H' && response_data[i + 1] == 'T' && response_data[i + 2] == 'T' &&
+            response_data[i + 3] == 'P' && response_data[i + 4] == '/' &&
+            (response_data[i + 5] == '1' || response_data[i + 5] == '2') &&
+            response_data[i + 6] == '.' &&
+            (response_data[i + 7] == '0' || response_data[i + 7] == '1') &&
+            response_data[i + 8] == ' ') {
+
+            size_t status_start = i + 9;
+            if (status_start + 3 < response_data.size()) {
+                int status = 0;
+                for (int j = 0; j < 3 && status_start + j < response_data.size(); ++j) {
+                    char c = response_data[status_start + j];
+                    if (c >= '0' && c <= '9') {
+                        status = status * 10 + (c - '0');
+                    } else {
+                        break;
+                    }
+                }
+
+                if (status >= 100 && status < 600) {
+                    it->second.request_info.status_code = status;
+                    return;
+                }
+            }
+            break;
+        }
+    }
+}
+
+void HttpDataForwarder::clear_request_info(int client_fd) {
+    http_states_.erase(client_fd);
+}
+
+void HttpDataForwarder::set_backend_to_client_map(std::function<int(int)> get_client_fd) {
+    get_client_fd_ = std::move(get_client_fd);
+}
+
+void HttpDataForwarder::set_access_log_callback(AccessLogCallback callback) {
+    access_log_callback_ = std::move(callback);
 }
 
 } // namespace lb::core

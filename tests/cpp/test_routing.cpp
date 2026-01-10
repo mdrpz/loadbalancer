@@ -121,17 +121,19 @@ void test_weighted_round_robin() {
     for (int i = 0; i < 20; i++) {
         auto selected = pool.select_backend();
         assert(selected != nullptr);
-        if (selected->host() == "10.0.0.1") count1++;
-        else if (selected->host() == "10.0.0.2") count2++;
+        if (selected->host() == "10.0.0.1")
+            count1++;
+        else if (selected->host() == "10.0.0.2")
+            count2++;
     }
 
     // With weights 3:1, expect roughly 15:5 distribution
     // Allow some tolerance, but backend1 should get more
-    assert(count1 > count2);  // Backend1 (weight 3) should get more traffic
-    assert(count1 == 15);     // Exactly 15 for weight 3 out of 20
-    assert(count2 == 5);      // Exactly 5 for weight 1 out of 20
+    assert(count1 > count2); // Backend1 (weight 3) should get more traffic
+    assert(count1 == 15);    // Exactly 15 for weight 3 out of 20
+    assert(count2 == 5);     // Exactly 5 for weight 1 out of 20
 
-    std::cout << "Weighted round-robin test passed! (backend1: " << count1 
+    std::cout << "Weighted round-robin test passed! (backend1: " << count1
               << ", backend2: " << count2 << ")\n";
 }
 

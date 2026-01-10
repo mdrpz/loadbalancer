@@ -28,6 +28,10 @@ public:
 
     void set_pool_manager(ConnectionPoolManager* pool_manager);
 
+    using BackendSelectedCallback =
+        std::function<void(int client_fd, const std::string& host, uint16_t port)>;
+    void set_backend_selected_callback(BackendSelectedCallback callback);
+
     struct BackendInfo {
         std::string host;
         uint16_t port;
@@ -50,6 +54,7 @@ private:
 
     ConnectionPoolManager* pool_manager_ = nullptr;
     std::unordered_map<int, BackendInfo> pooled_connections_;
+    BackendSelectedCallback backend_selected_callback_;
 };
 
 } // namespace lb::core

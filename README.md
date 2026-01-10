@@ -77,7 +77,8 @@ timeouts:
 - **Connection Pooling** - Reuses backend connections (-36% p95 latency)
 - **Routing** - Round-robin, least-connections, weighted
 - **Metrics** - Prometheus endpoint at `:9090/metrics`
-- **Access Logging** - Combined log format (like nginx)
+- **Access Logging** - Combined log format (like nginx) with per-request logging
+- **Request Timeouts** - Automatic connection timeout for slow clients with per-request logging
 
 ## Architecture
 
@@ -113,6 +114,22 @@ cmake .. -DBUILD_BENCH=ON && cmake --build .
 ./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
 ```
 
+## Code Formatting & Linting
+
+```bash
+# Format C++ code
+find src bench -name "*.cpp" -o -name "*.h" | xargs clang-format -i
+
+# Check C++ formatting
+find src bench -name "*.cpp" -o -name "*.h" | xargs clang-format --dry-run --Werror
+
+# Format Python code
+python3 -m ruff format .
+
+# Lint Python code
+python3 -m ruff format check --fix .
+```
+
 ## TLS Setup
 
 ```bash
@@ -130,21 +147,54 @@ listener:
   use_splice: true  # Linux only, TCP mode only
 ```
 
+## Access Logging
+
+Access logs are written in combined log format (similar to nginx/Apache). Each HTTP request is logged with client IP, method, path, status code, bytes transferred, latency, and backend server.
+
+Logs are written asynchronously to avoid blocking the event loop. Configure in `config.yaml`:
+
+```yaml
+logging:
+  access_log_enabled: true
+  access_log_file: "/tmp/lb_access.log"
+```
+
+## Request Timeouts
+
+The load balancer can automatically close connections that exceed a configured timeout. This prevents slow clients from holding connections open indefinitely.
+
+Configure in `config.yaml`:
+
+```yaml
+timeouts:
+  request_ms: 5000  # Close connections after 5 seconds
+```
+
+Timed-out requests are tracked in the `lb_request_timeouts_total` metric.
+
 ## Metrics
 
-Prometheus endpoint at `http://localhost:9090/metrics`:
+Prometheus metrics are served at http://localhost:9090/metrics
 
-| Metric | Type | Description |
-|--------|------|-------------|
-| `lb_connections_total` | counter | Total connections accepted |
-| `lb_connections_active` | gauge | Current active connections |
-| `lb_bytes_received_total` | counter | Total bytes from clients |
-| `lb_bytes_sent_total` | counter | Total bytes to clients |
-| `lb_request_duration_ms_bucket` | histogram | Request latency distribution |
-| `lb_backend_requests_total{backend="..."}` | counter | Requests per backend |
-| `lb_backend_errors_total{backend="..."}` | counter | Errors per backend |
-| `lb_request_timeouts_total` | counter | Timed out requests |
-| `lb_overload_drops_total` | counter | Dropped due to overload |
+The following metrics are available:
+
+`lb_connections_total` (counter): Total number of connections accepted.
+
+`lb_connections_active` (gauge): Current number of active connections.
+
+`lb_bytes_received_total` (counter): Total bytes received from clients.
+
+`lb_bytes_sent_total` (counter): Total bytes sent to clients.
+
+`lb_request_duration_ms_bucket` (histogram): Distribution of request latencies.
+
+`lb_backend_requests_total{backend="..."}` (counter): Number of requests per backend.
+
+`lb_backend_errors_total{backend="..."}` (counter): Number of errors per backend.
+
+`lb_request_timeouts_total` (counter): Number of timed out requests.
+
+`lb_overload_drops_total` (counter): Number of requests dropped due to overload.
 
 ## Troubleshooting
 

@@ -48,4 +48,4 @@ logging:
   access_log_file: "/tmp/lb_access.log"
 
 timeouts:
-  request_ms: 30000
+  request_ms: 5000

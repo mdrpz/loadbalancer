@@ -48,6 +48,7 @@ private:
     void handle_accept();
 
     void cleanup_drained_backends();
+    void check_request_timeouts();
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -73,6 +74,7 @@ private:
 
     static constexpr int MAX_RETRY_ATTEMPTS = 3;
     uint32_t connection_timeout_seconds_;
+    uint32_t request_timeout_ms_;
 
     std::unique_ptr<ConnectionManager> connection_manager_;
     std::unique_ptr<ConnectionPoolManager> pool_manager_;

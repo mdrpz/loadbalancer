@@ -9,12 +9,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <sstream>
 #include <stdexcept>
+#include <vector>
 #include "config/config.h"
 #include "core/backend_node.h"
 #include "core/http_data_forwarder.h"
 #include "core/splice_forwarder.h"
 #include "health/health_checker.h"
+#include "logging/access_logger.h"
 #include "logging/logger.h"
 #include "metrics/metrics.h"
 #include "tls/tls_context.h"
@@ -23,8 +26,8 @@ namespace lb::core {
 
 LoadBalancer::LoadBalancer()
     : max_global_connections_(1000), max_connections_per_backend_(100),
-      backpressure_timeout_ms_(10000), connection_timeout_seconds_(5), config_manager_(nullptr),
-      mode_("tcp") {
+      backpressure_timeout_ms_(10000), connection_timeout_seconds_(5), request_timeout_ms_(0),
+      config_manager_(nullptr), mode_("tcp") {
     reactor_ = std::make_unique<net::EpollReactor>();
     backend_pool_ = std::make_unique<BackendPool>();
     health_checker_ = std::make_unique<lb::health::HealthChecker>();
@@ -152,7 +155,7 @@ bool LoadBalancer::initialize(const std::string& listen_host, uint16_t listen_po
 void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager) {
     config_manager_ = config_manager;
 
-    if (reactor_ && config_manager_)
+    if (reactor_ && config_manager_) {
         reactor_->set_periodic_callback(
             [this]() {
                 if (config_manager_ && config_manager_->check_and_reload()) {
@@ -164,8 +167,10 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                 if (pool_manager_) {
                     pool_manager_->evict_expired();
                 }
+                check_request_timeouts();
             },
-            5000);
+            1000);
+    }
 }
 
 void LoadBalancer::run() {
@@ -188,6 +193,7 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
+    request_timeout_ms_ = config->request_timeout_ms;
     mode_ = config->mode.empty() ? "tcp" : config->mode;
 
     backpressure_manager_ =
@@ -215,6 +221,58 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
             },
             tls_context_ && tls_context_->is_initialized());
         lb::logging::Logger::instance().info("HTTP mode enabled");
+
+        if (http_data_forwarder_) {
+            http_data_forwarder_->set_access_log_callback([](int, const RequestInfo& req_info) {
+                if (req_info.method.empty())
+                    return;
+
+                auto end_time =
+                    req_info.response_complete &&
+                            req_info.response_complete_time.time_since_epoch().count() > 0
+                        ? req_info.response_complete_time
+                        : std::chrono::system_clock::now();
+                auto latency = std::chrono::duration_cast<std::chrono::microseconds>(
+                    end_time - req_info.start_time);
+
+                lb::logging::AccessLogEntry entry;
+                entry.client_ip = req_info.client_ip;
+                entry.method = req_info.method;
+                entry.path = req_info.path;
+                entry.status_code = req_info.status_code > 0 ? req_info.status_code : 0;
+                entry.bytes_sent = req_info.bytes_sent;
+                entry.bytes_received = req_info.bytes_received;
+                entry.latency = latency;
+                entry.backend = req_info.backend;
+                entry.timestamp = req_info.start_time;
+
+                lb::logging::AccessLogger::instance().log(entry);
+
+                if (latency.count() > 0) {
+                    double latency_ms = latency.count() / 1000.0;
+                    lb::metrics::Metrics::instance().record_request_latency_ms(latency_ms);
+                }
+            });
+
+            connection_manager_->set_access_log_callback([this](int client_fd) -> RequestInfo* {
+                return http_data_forwarder_->get_request_info(client_fd);
+            });
+            connection_manager_->set_clear_request_info_callback(
+                [this](int client_fd) { http_data_forwarder_->clear_request_info(client_fd); });
+            http_data_forwarder_->set_backend_to_client_map([this](int backend_fd) -> int {
+                auto it = backend_to_client_map_.find(backend_fd);
+                return (it != backend_to_client_map_.end()) ? it->second : 0;
+            });
+        }
+
+        if (backend_connector_ && http_data_forwarder_) {
+            backend_connector_->set_backend_selected_callback(
+                [this](int client_fd, const std::string& host, uint16_t port) {
+                    std::ostringstream backend_str;
+                    backend_str << host << ":" << port;
+                    http_data_forwarder_->set_backend_for_request(client_fd, backend_str.str());
+                });
+        }
     }
 
     use_splice_ = config->use_splice && mode_ == "tcp";
@@ -279,6 +337,11 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
                                              " per backend)");
     }
 
+    if (request_timeout_ms_ > 0) {
+        lb::logging::Logger::instance().info(
+            "Request timeout enabled: " + std::to_string(request_timeout_ms_) + "ms");
+    }
+
     return true;
 }
 
@@ -341,6 +404,39 @@ void LoadBalancer::cleanup_drained_backends() {
     }
 }
 
+void LoadBalancer::check_request_timeouts() {
+    if (request_timeout_ms_ == 0)
+        return;
+
+    auto now = std::chrono::steady_clock::now();
+    std::vector<int> timed_out_fds;
+
+    for (const auto& [fd, conn] : connections_) {
+        if (backend_connections_.find(fd) != backend_connections_.end())
+            continue;
+
+        if (!conn || conn->state() != net::ConnectionState::ESTABLISHED)
+            continue;
+
+        auto it = connection_times_.find(fd);
+        if (it != connection_times_.end()) {
+            auto elapsed =
+                std::chrono::duration_cast<std::chrono::milliseconds>(now - it->second).count();
+
+            if (elapsed >= static_cast<int64_t>(request_timeout_ms_)) {
+                timed_out_fds.push_back(fd);
+            }
+        }
+    }
+
+    for (int fd : timed_out_fds) {
+        lb::metrics::Metrics::instance().increment_request_timeouts();
+        lb::logging::Logger::instance().warn("Request timeout for connection fd=" +
+                                             std::to_string(fd));
+        connection_manager_->close_connection(fd);
+    }
+}
+
 void LoadBalancer::add_backend(const std::string& host, uint16_t port, uint32_t weight) {
     auto existing = backend_pool_->find_backend(host, port);
     if (existing)
@@ -395,6 +491,7 @@ void LoadBalancer::handle_accept() {
 
             int client_fd_stored = client_conn->fd();
             connections_[client_fd_stored] = std::move(client_conn);
+            connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
 
             reactor_->add_fd(client_fd_stored, EPOLLIN | EPOLLOUT,
                              [this](int fd, net::EventType type) {
@@ -402,6 +499,8 @@ void LoadBalancer::handle_accept() {
                              });
         } else {
             client_conn->set_state(net::ConnectionState::ESTABLISHED);
+            int client_fd_stored = client_conn->fd();
+            connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
             backend_connector_->connect(std::move(client_conn), 0);
         }
     }

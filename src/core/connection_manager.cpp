@@ -1,4 +1,5 @@
 #include "core/connection_manager.h"
+#include "logging/access_logger.h"
 #include "logging/logger.h"
 #include "metrics/metrics.h"
 
@@ -18,6 +19,14 @@ ConnectionManager::ConnectionManager(
 
 void ConnectionManager::set_pool_release_callback(PoolReleaseCallback callback) {
     pool_release_callback_ = std::move(callback);
+}
+
+void ConnectionManager::set_access_log_callback(AccessLogCallback callback) {
+    access_log_callback_ = std::move(callback);
+}
+
+void ConnectionManager::set_clear_request_info_callback(ClearRequestInfoCallback callback) {
+    clear_request_info_callback_ = std::move(callback);
 }
 
 net::Connection* ConnectionManager::get_connection(int fd) {
@@ -77,6 +86,41 @@ void ConnectionManager::close_connection(int fd) {
     lb::metrics::Metrics::instance().add_bytes_out(conn->bytes_written());
 
     if (is_client_connection) {
+        if (access_log_callback_) {
+            RequestInfo* req_info = access_log_callback_(fd);
+            if (req_info && !req_info->method.empty() && !req_info->response_complete) {
+                auto end_time =
+                    req_info->response_complete &&
+                            req_info->response_complete_time.time_since_epoch().count() > 0
+                        ? req_info->response_complete_time
+                        : std::chrono::system_clock::now();
+                auto latency = std::chrono::duration_cast<std::chrono::microseconds>(
+                    end_time - req_info->start_time);
+
+                lb::logging::AccessLogEntry entry;
+                entry.client_ip = req_info->client_ip;
+                entry.method = req_info->method;
+                entry.path = req_info->path;
+                entry.status_code = req_info->status_code > 0 ? req_info->status_code : 0;
+                entry.bytes_sent = conn->bytes_written();
+                entry.bytes_received = conn->bytes_read();
+                entry.latency = latency;
+                entry.backend = req_info->backend;
+                entry.timestamp = req_info->start_time;
+
+                lb::logging::AccessLogger::instance().log(entry);
+
+                if (latency.count() > 0) {
+                    double latency_ms = latency.count() / 1000.0;
+                    lb::metrics::Metrics::instance().record_request_latency_ms(latency_ms);
+                }
+
+                if (clear_request_info_callback_) {
+                    clear_request_info_callback_(fd);
+                }
+            }
+        }
+
         lb::metrics::Metrics::instance().decrement_connections_active();
         lb::logging::Logger::instance().debug("Client connection closed (fd=" + std::to_string(fd) +
                                               ")");
