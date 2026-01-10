@@ -20,6 +20,52 @@ python3 -m http.server 8000 &
 curl http://localhost:8080/
 ```
 
+## Backend Setup
+
+### Python HTTP Server (Quick Testing)
+
+Best for: Quick testing, development, simple HTTP responses
+
+```bash
+# Start Python backend
+python3 -m http.server 8000
+
+# Configure in config.yaml
+backends:
+  - host: "127.0.0.1"
+    port: 8000
+```
+
+### Nginx Backend (Production Testing)
+
+Best for: Production-like testing, performance benchmarks, realistic HTTP behavior
+
+```bash
+# Install nginx (Ubuntu/Debian)
+sudo apt install nginx
+
+# Enable and start
+sudo systemctl restart nginx
+
+# Configure in config.yaml
+backends:
+  - host: "127.0.0.1"
+    port: 80
+```
+
+### Load Testing
+
+```bash
+# Test with Python backend (100 connections, 10 seconds)
+./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
+
+# Test with Nginx backend (higher concurrency)
+./bench/load_generator 127.0.0.1 8080 -c 500 -d 30
+
+# Test with custom parameters
+./bench/load_generator 127.0.0.1 8080 -c 200 -d 60  # 200 connections, 60 seconds
+```
+
 ## Docker
 
 ```bash
@@ -47,7 +93,7 @@ listener:
 
 backends:
   - host: "127.0.0.1"
-    port: 8000
+    port: 8000              # or port 80 if using nginx backend
     weight: 3               # Gets 3x traffic (default: 1)
   - host: "127.0.0.1"
     port: 8001
@@ -109,9 +155,31 @@ python3 -m pytest -v
 # C++ unit tests
 cd build && ctest
 
-# Load generator
+# Build load generator
 cmake .. -DBUILD_BENCH=ON && cmake --build .
+
+# Run load tests (see Backend Setup section for more examples)
 ./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
+```
+
+### Performance
+
+Example benchmark results with nginx (100 concurrent connections, 10 seconds):
+
+```
+Duration:        10.04s
+Connections:     100
+Total requests:  29400
+Successful:      29400 (100.00%)
+Failed:          0 (0.00%)
+Throughput:      2927 req/s
+
+Latency (ms):
+  avg:    34.07
+  p50:    32.40
+  p95:    46.86
+  p99:    53.30
+  max:    93.60
 ```
 
 ## Code Formatting & Linting
