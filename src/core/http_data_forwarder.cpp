@@ -158,6 +158,10 @@ bool HttpDataForwarder::parse_and_modify_http_request(net::Connection* conn, int
 
         lb::http::HttpHandler::modify_request_headers(request, client_ip, is_https_);
 
+        if (custom_header_modifier_) {
+            custom_header_modifier_(request);
+        }
+
         auto modified_request = serialize_http_request(request);
 
         read_buf = std::move(modified_request);
@@ -258,6 +262,15 @@ void HttpDataForwarder::set_backend_to_client_map(std::function<int(int)> get_cl
 
 void HttpDataForwarder::set_access_log_callback(AccessLogCallback callback) {
     access_log_callback_ = std::move(callback);
+}
+
+void HttpDataForwarder::set_custom_header_modifier(
+    std::function<void(lb::http::HttpRequest&)> modifier) {
+    if (modifier) {
+        custom_header_modifier_ = std::move(modifier);
+    } else {
+        custom_header_modifier_ = nullptr;
+    }
 }
 
 } // namespace lb::core

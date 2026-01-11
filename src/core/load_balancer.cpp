@@ -225,6 +225,18 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
             tls_context_ && tls_context_->is_initialized());
         lb::logging::Logger::instance().info("HTTP mode enabled");
 
+        if (http_data_forwarder_ && config) {
+            auto headers_to_add = config->http_request_headers_add;
+            auto headers_to_remove = config->http_request_headers_remove;
+            if (!headers_to_add.empty() || !headers_to_remove.empty()) {
+                http_data_forwarder_->set_custom_header_modifier(
+                    [headers_to_add, headers_to_remove](lb::http::HttpRequest& request) {
+                        lb::http::HttpHandler::apply_custom_headers(request, headers_to_add,
+                                                                    headers_to_remove);
+                    });
+            }
+        }
+
         if (http_data_forwarder_) {
             http_data_forwarder_->set_access_log_callback([](int, const RequestInfo& req_info) {
                 if (req_info.method.empty())
@@ -367,6 +379,20 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
 
     backpressure_manager_ =
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
+
+    if (mode_ == "http" && http_data_forwarder_) {
+        auto headers_to_add = config->http_request_headers_add;
+        auto headers_to_remove = config->http_request_headers_remove;
+        if (!headers_to_add.empty() || !headers_to_remove.empty()) {
+            http_data_forwarder_->set_custom_header_modifier(
+                [headers_to_add, headers_to_remove](lb::http::HttpRequest& request) {
+                    lb::http::HttpHandler::apply_custom_headers(request, headers_to_add,
+                                                                headers_to_remove);
+                });
+        } else {
+            http_data_forwarder_->set_custom_header_modifier(nullptr);
+        }
+    }
 
     auto current_backends = backend_pool_->get_all_backends();
 

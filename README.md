@@ -134,6 +134,7 @@ timeouts:
 - **Request Timeouts** - Automatic connection timeout for slow clients with per-request logging
 - **IP Filtering** - Whitelist/blacklist IP addresses for security
 - **HTTP Error Responses** - Proper HTTP error responses when rejecting connections
+- **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests
 
 ## Architecture
 
@@ -281,23 +282,22 @@ ip_filter:
   blacklist: []  # Empty = disabled. These IPs are always rejected
 ```
 
-**Behavior:**
-- **Blacklist**: Always checked first. If an IP is blacklisted, connection is rejected.
-- **Whitelist**: If non-empty, only IPs in the whitelist are allowed. If empty, all IPs (except blacklisted) are allowed.
-- **HTTP Mode**: Rejected connections receive proper HTTP error responses (403 Forbidden for IP filtering, 503 Service Unavailable for connection limits).
-- **TCP Mode**: Rejected connections are simply closed.
+## Custom HTTP Headers
 
-**Examples:**
+The load balancer can add, modify, or remove HTTP headers in requests before forwarding them to backends. This is useful for adding security headers, custom routing headers, or removing sensitive information.
+
+Configure in `config.yaml`:
+
 ```yaml
-# Only allow localhost
-ip_filter:
-  whitelist: ["127.0.0.1"]
-  blacklist: []
-
-# Block specific IPs
-ip_filter:
-  whitelist: []
-  blacklist: ["10.0.0.1", "192.168.1.100"]
+http_headers:
+  request:
+    add:
+      X-Custom-Header: "value"
+      X-LB-Version: "1.0"
+      X-Security-Token: "abc123"
+    remove:
+      - "User-Agent"
+      - "X-Original-Header"
 ```
 
 ## Metrics

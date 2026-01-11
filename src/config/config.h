@@ -4,6 +4,7 @@
 #include <ctime>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace lb::config {
@@ -63,6 +64,9 @@ struct Config {
 
     std::vector<std::string> ip_whitelist;
     std::vector<std::string> ip_blacklist;
+
+    std::unordered_map<std::string, std::string> http_request_headers_add;
+    std::vector<std::string> http_request_headers_remove;
 };
 
 class ConfigManager {

@@ -44,6 +44,8 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->graceful_shutdown_timeout_seconds = 30;
     config_->ip_whitelist.clear();
     config_->ip_blacklist.clear();
+    config_->http_request_headers_add.clear();
+    config_->http_request_headers_remove.clear();
 }
 
 ConfigManager::~ConfigManager() = default;
@@ -232,6 +234,24 @@ bool ConfigManager::load_from_file(const std::string& path) {
             if (ip_filter["blacklist"] && ip_filter["blacklist"].IsSequence()) {
                 for (const auto& ip : ip_filter["blacklist"]) {
                     new_config->ip_blacklist.push_back(ip.as<std::string>());
+                }
+            }
+        }
+
+        if (config["http_headers"] && config["http_headers"]["request"]) {
+            const auto& request_headers = config["http_headers"]["request"];
+
+            if (request_headers["add"] && request_headers["add"].IsMap()) {
+                for (const auto& item : request_headers["add"]) {
+                    std::string key = item.first.as<std::string>();
+                    std::string value = item.second.as<std::string>();
+                    new_config->http_request_headers_add[key] = value;
+                }
+            }
+
+            if (request_headers["remove"] && request_headers["remove"].IsSequence()) {
+                for (const auto& header : request_headers["remove"]) {
+                    new_config->http_request_headers_remove.push_back(header.as<std::string>());
                 }
             }
         }

@@ -42,6 +42,8 @@ public:
     using AccessLogCallback = std::function<void(int client_fd, const RequestInfo&)>;
     void set_access_log_callback(AccessLogCallback callback);
 
+    void set_custom_header_modifier(std::function<void(lb::http::HttpRequest&)> modifier);
+
 private:
     net::EpollReactor& reactor_;
     std::function<void(int)> start_backpressure_;
@@ -50,6 +52,7 @@ private:
     std::function<std::string(int)> get_client_ip_;
     std::function<int(int)> get_client_fd_;
     AccessLogCallback access_log_callback_;
+    std::function<void(lb::http::HttpRequest&)> custom_header_modifier_;
     bool is_https_;
 
     struct HttpState {

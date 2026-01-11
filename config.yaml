@@ -1,7 +1,7 @@
 listener:
   host: "0.0.0.0"
   port: 8080
-  mode: "tcp"             # "tcp" or "http"
+  mode: "http"             # "tcp" or "http"
   use_splice: false         # Zero-copy mode (TCP only, Linux, experimental)
   tls_enabled: false
   tls_cert: "certs/server.crt"
@@ -53,3 +53,11 @@ timeouts:
 ip_filter:
   whitelist: []
   blacklist: []
+
+http_headers:
+  request:
+    add:
+      # X-Custom-Header: "value"
+      # X-LB-Version: "1.0"
+    remove:
+      # - "User-Agent"

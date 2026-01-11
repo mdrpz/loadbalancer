@@ -1,6 +1,8 @@
 #pragma once
 
 #include <string>
+#include <unordered_map>
+#include <vector>
 #include "http/http_request.h"
 #include "http/http_response.h"
 
@@ -10,6 +12,10 @@ class HttpHandler {
 public:
     static void modify_request_headers(HttpRequest& request, const std::string& client_ip,
                                        bool is_https);
+
+    static void apply_custom_headers(
+        HttpRequest& request, const std::unordered_map<std::string, std::string>& headers_to_add,
+        const std::vector<std::string>& headers_to_remove);
 
     static bool is_http_request(const std::vector<uint8_t>& buffer);
 
