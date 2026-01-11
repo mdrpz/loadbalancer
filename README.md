@@ -55,15 +55,22 @@ backends:
 
 ### Load Testing
 
+**Important:** The load generator mode must be compatible with the listener mode in `config.yaml`:
+- **LB in TCP mode** (`mode: "tcp"`): Use `--tcp` flag. Sends raw TCP bytes; no HTTP parsing/metrics/access logs.
+- **LB in HTTP mode** (`mode: "http"`): Use default (HTTP) or `--http` flag. Sends HTTP requests; full HTTP parsing/metrics/access logs.
+
 ```bash
-# Test with Python backend (100 connections, 10 seconds)
+# HTTP mode - config.yaml must have mode: "http"
 ./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
 
-# Test with Nginx backend (higher concurrency)
+# TCP mode - use --tcp flag and config.yaml must have mode: "tcp"
+./bench/load_generator 127.0.0.1 8080 -c 100 -d 10 --tcp
+
+# Test with Nginx backend (higher concurrency, HTTP mode)
 ./bench/load_generator 127.0.0.1 8080 -c 500 -d 30
 
-# Test with custom parameters
-./bench/load_generator 127.0.0.1 8080 -c 200 -d 60  # 200 connections, 60 seconds
+# Test with custom parameters (TCP mode)
+./bench/load_generator 127.0.0.1 8080 -c 200 -d 60 --tcp  # 200 connections, 60 seconds
 ```
 
 ## Docker
@@ -159,13 +166,18 @@ cd build && ctest
 cmake .. -DBUILD_BENCH=ON && cmake --build .
 
 # Run load tests (see Backend Setup section for more examples)
+# HTTP mode (default)
 ./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
+
+# TCP mode (use --tcp flag, ensure config.yaml has mode: "tcp")
+./bench/load_generator 127.0.0.1 8080 -c 100 -d 10 --tcp
 ```
 
 ### Performance
 
 Example benchmark results with nginx (100 concurrent connections, 10 seconds):
 
+**HTTP Mode:**
 ```
 Duration:        10.04s
 Connections:     100
@@ -180,6 +192,23 @@ Latency (ms):
   p95:    46.86
   p99:    53.30
   max:    93.60
+```
+
+**TCP Mode:**
+```
+Duration:        10.02s
+Connections:     100
+Total requests:  32200
+Successful:      32200 (100.00%)
+Failed:          0 (0.00%)
+Throughput:      3212 req/s
+
+Latency (ms):
+  avg:    31.07
+  p50:    29.39
+  p95:    43.44
+  p99:    52.33
+  max:    63.24
 ```
 
 ## Code Formatting & Linting

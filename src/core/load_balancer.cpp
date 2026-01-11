@@ -351,6 +351,13 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
 
     lb::logging::Logger::instance().info("Applying configuration reload");
 
+    std::string new_mode = config->mode.empty() ? "tcp" : config->mode;
+    if (new_mode != mode_) {
+        lb::logging::Logger::instance().warn(
+            "Mode change detected in config (current: \"" + mode_ + "\", new: \"" + new_mode +
+            "\"). Mode changes require a restart to take effect. Current mode will remain active.");
+    }
+
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
