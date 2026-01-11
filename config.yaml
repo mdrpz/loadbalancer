@@ -49,3 +49,7 @@ logging:
 
 timeouts:
   request_ms: 5000
+
+ip_filter:
+  whitelist: []
+  blacklist: []

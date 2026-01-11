@@ -49,6 +49,9 @@ private:
 
     void cleanup_drained_backends();
     void check_request_timeouts();
+    bool is_ip_allowed(const std::string& client_ip,
+                       const std::shared_ptr<const lb::config::Config>& config) const;
+    void send_http_error_and_close(int client_fd, const lb::http::HttpResponse& response);
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;

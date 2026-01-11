@@ -60,6 +60,9 @@ struct Config {
     uint32_t backpressure_timeout_ms;
 
     uint32_t graceful_shutdown_timeout_seconds;
+
+    std::vector<std::string> ip_whitelist;
+    std::vector<std::string> ip_blacklist;
 };
 
 class ConfigManager {

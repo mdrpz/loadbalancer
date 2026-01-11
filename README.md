@@ -132,6 +132,8 @@ timeouts:
 - **Metrics** - Prometheus endpoint at `:9090/metrics`
 - **Access Logging** - Combined log format (like nginx) with per-request logging
 - **Request Timeouts** - Automatic connection timeout for slow clients with per-request logging
+- **IP Filtering** - Whitelist/blacklist IP addresses for security
+- **HTTP Error Responses** - Proper HTTP error responses when rejecting connections
 
 ## Architecture
 
@@ -268,6 +270,35 @@ timeouts:
 ```
 
 Timed-out requests are tracked in the `lb_request_timeouts_total` metric.
+
+## IP Filtering
+
+The load balancer supports IP whitelisting and blacklisting for security. Configure in `config.yaml`:
+
+```yaml
+ip_filter:
+  whitelist: []  # Empty = disabled. If non-empty, only these IPs are allowed
+  blacklist: []  # Empty = disabled. These IPs are always rejected
+```
+
+**Behavior:**
+- **Blacklist**: Always checked first. If an IP is blacklisted, connection is rejected.
+- **Whitelist**: If non-empty, only IPs in the whitelist are allowed. If empty, all IPs (except blacklisted) are allowed.
+- **HTTP Mode**: Rejected connections receive proper HTTP error responses (403 Forbidden for IP filtering, 503 Service Unavailable for connection limits).
+- **TCP Mode**: Rejected connections are simply closed.
+
+**Examples:**
+```yaml
+# Only allow localhost
+ip_filter:
+  whitelist: ["127.0.0.1"]
+  blacklist: []
+
+# Block specific IPs
+ip_filter:
+  whitelist: []
+  blacklist: ["10.0.0.1", "192.168.1.100"]
+```
 
 ## Metrics
 

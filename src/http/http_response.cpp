@@ -75,6 +75,8 @@ std::string HttpResponse::get_status_reason() const {
         return "Method Not Allowed";
     case 408:
         return "Request Timeout";
+    case 429:
+        return "Too Many Requests";
     case 500:
         return "Internal Server Error";
     case 502:
@@ -104,8 +106,16 @@ HttpResponse HttpResponse::not_found(const std::string& message) {
     return error_response(HttpStatusCode::NOT_FOUND, message);
 }
 
+HttpResponse HttpResponse::forbidden(const std::string& message) {
+    return error_response(HttpStatusCode::FORBIDDEN, message);
+}
+
 HttpResponse HttpResponse::service_unavailable(const std::string& message) {
     return error_response(HttpStatusCode::SERVICE_UNAVAILABLE, message);
+}
+
+HttpResponse HttpResponse::too_many_requests(const std::string& message) {
+    return error_response(HttpStatusCode::TOO_MANY_REQUESTS, message);
 }
 
 } // namespace lb::http

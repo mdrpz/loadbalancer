@@ -11,12 +11,15 @@
 #include <cstring>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 #include "config/config.h"
 #include "core/backend_node.h"
 #include "core/http_data_forwarder.h"
 #include "core/splice_forwarder.h"
 #include "health/health_checker.h"
+#include "http/http_handler.h"
+#include "http/http_response.h"
 #include "logging/access_logger.h"
 #include "logging/logger.h"
 #include "metrics/metrics.h"
@@ -458,6 +461,58 @@ void LoadBalancer::add_backend(const std::string& host, uint16_t port, uint32_t 
                                          " (weight=" + std::to_string(weight) + ")");
 }
 
+bool LoadBalancer::is_ip_allowed(const std::string& client_ip,
+                                 const std::shared_ptr<const lb::config::Config>& config) const {
+    if (!config || client_ip.empty())
+        return true;
+
+    for (const auto& blacklisted : config->ip_blacklist) {
+        if (client_ip == blacklisted) {
+            lb::logging::Logger::instance().warn("Connection rejected: IP " + client_ip +
+                                                 " is blacklisted");
+            return false;
+        }
+    }
+
+    if (!config->ip_whitelist.empty()) {
+        bool allowed = false;
+        for (const auto& whitelisted : config->ip_whitelist) {
+            if (client_ip == whitelisted) {
+                allowed = true;
+                break;
+            }
+        }
+        if (!allowed) {
+            lb::logging::Logger::instance().warn("Connection rejected: IP " + client_ip +
+                                                 " not in whitelist");
+            return false;
+        }
+    }
+
+    return true;
+}
+
+void LoadBalancer::send_http_error_and_close(int client_fd,
+                                             const lb::http::HttpResponse& response) {
+    auto response_bytes = response.to_bytes();
+    ssize_t sent = 0;
+    ssize_t total = response_bytes.size();
+
+    while (sent < total) {
+        ssize_t bytes = send(client_fd, response_bytes.data() + sent, total - sent, 0);
+        if (bytes < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                break;
+            }
+            break;
+        }
+        sent += bytes;
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ::close(client_fd);
+}
+
 void LoadBalancer::handle_accept() {
     while (true) {
         int client_fd = listener_->accept();
@@ -467,13 +522,40 @@ void LoadBalancer::handle_accept() {
             }
             break;
         }
+
+        std::string client_ip = lb::http::HttpHandler::extract_client_ip(client_fd);
+        if (client_ip.empty())
+            client_ip = "unknown";
+
+        auto config = config_manager_ ? config_manager_->get_config() : nullptr;
+
+        if (!is_ip_allowed(client_ip, config)) {
+            lb::metrics::Metrics::instance().increment_overload_drops();
+
+            if (config && config->mode == "http") {
+                lb::http::HttpResponse error_resp =
+                    lb::http::HttpResponse::forbidden("IP address not allowed");
+                send_http_error_and_close(client_fd, error_resp);
+            } else {
+                ::close(client_fd);
+            }
+            continue;
+        }
+
         size_t established_count = connection_manager_->count_established_connections();
         if (established_count >= max_global_connections_) {
             lb::metrics::Metrics::instance().increment_overload_drops();
             lb::logging::Logger::instance().warn("Connection rejected: global connection limit (" +
                                                  std::to_string(max_global_connections_) +
                                                  ") exceeded");
-            ::close(client_fd);
+
+            if (config && config->mode == "http") {
+                lb::http::HttpResponse error_resp =
+                    lb::http::HttpResponse::service_unavailable("Service temporarily unavailable");
+                send_http_error_and_close(client_fd, error_resp);
+            } else {
+                ::close(client_fd);
+            }
             continue;
         }
         lb::metrics::Metrics::instance().increment_connections_total();

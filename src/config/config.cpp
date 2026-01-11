@@ -42,6 +42,8 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->global_buffer_budget_mb = 512;
     config_->backpressure_timeout_ms = 10000;
     config_->graceful_shutdown_timeout_seconds = 30;
+    config_->ip_whitelist.clear();
+    config_->ip_blacklist.clear();
 }
 
 ConfigManager::~ConfigManager() = default;
@@ -218,6 +220,20 @@ bool ConfigManager::load_from_file(const std::string& path) {
             if (shutdown["timeout_seconds"])
                 new_config->graceful_shutdown_timeout_seconds =
                     shutdown["timeout_seconds"].as<uint32_t>();
+        }
+
+        if (config["ip_filter"]) {
+            const auto& ip_filter = config["ip_filter"];
+            if (ip_filter["whitelist"] && ip_filter["whitelist"].IsSequence()) {
+                for (const auto& ip : ip_filter["whitelist"]) {
+                    new_config->ip_whitelist.push_back(ip.as<std::string>());
+                }
+            }
+            if (ip_filter["blacklist"] && ip_filter["blacklist"].IsSequence()) {
+                for (const auto& ip : ip_filter["blacklist"]) {
+                    new_config->ip_blacklist.push_back(ip.as<std::string>());
+                }
+            }
         }
 
         config_ = new_config;
