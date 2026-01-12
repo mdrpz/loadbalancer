@@ -22,6 +22,7 @@ public:
     void increment_backend_routes_failed();
     void increment_overload_drops();
     void increment_request_timeouts();
+    void increment_rate_limit_drops();
 
     void add_bytes_in(uint64_t bytes);
     void add_bytes_out(uint64_t bytes);
@@ -34,6 +35,7 @@ public:
     uint64_t get_backend_routes_failed() const;
     uint64_t get_overload_drops() const;
     uint64_t get_request_timeouts() const;
+    uint64_t get_rate_limit_drops() const;
     uint64_t get_bytes_in() const;
     uint64_t get_bytes_out() const;
 
@@ -48,6 +50,7 @@ private:
     std::atomic<uint64_t> backend_routes_failed_{0};
     std::atomic<uint64_t> overload_drops_{0};
     std::atomic<uint64_t> request_timeouts_{0};
+    std::atomic<uint64_t> rate_limit_drops_{0};
     std::atomic<uint64_t> bytes_in_{0};
     std::atomic<uint64_t> bytes_out_{0};
 

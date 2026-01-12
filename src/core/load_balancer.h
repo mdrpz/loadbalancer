@@ -2,8 +2,10 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_map>
+#include <vector>
 #include "core/backend_connector.h"
 #include "core/backend_node.h"
 #include "core/backend_pool.h"
@@ -52,6 +54,9 @@ private:
     bool is_ip_allowed(const std::string& client_ip,
                        const std::shared_ptr<const lb::config::Config>& config) const;
     void send_http_error_and_close(int client_fd, const lb::http::HttpResponse& response);
+    bool check_rate_limit(const std::string& client_ip,
+                          const std::shared_ptr<const lb::config::Config>& config);
+    void cleanup_rate_limit_entries();
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -94,6 +99,10 @@ private:
     lb::config::ConfigManager* config_manager_;
 
     std::string mode_;
+
+    std::unordered_map<std::string, std::vector<std::chrono::steady_clock::time_point>>
+        rate_limit_tracker_;
+    std::mutex rate_limit_mutex_;
 };
 
 } // namespace lb::core

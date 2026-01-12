@@ -46,6 +46,9 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->ip_blacklist.clear();
     config_->http_request_headers_add.clear();
     config_->http_request_headers_remove.clear();
+    config_->rate_limit_enabled = false;
+    config_->rate_limit_max_connections = 100;
+    config_->rate_limit_window_seconds = 60;
 }
 
 ConfigManager::~ConfigManager() = default;
@@ -254,6 +257,17 @@ bool ConfigManager::load_from_file(const std::string& path) {
                     new_config->http_request_headers_remove.push_back(header.as<std::string>());
                 }
             }
+        }
+
+        if (config["rate_limit"]) {
+            const auto& rate_limit = config["rate_limit"];
+            if (rate_limit["enabled"])
+                new_config->rate_limit_enabled = rate_limit["enabled"].as<bool>();
+            if (rate_limit["max_connections"])
+                new_config->rate_limit_max_connections =
+                    rate_limit["max_connections"].as<uint32_t>();
+            if (rate_limit["window_seconds"])
+                new_config->rate_limit_window_seconds = rate_limit["window_seconds"].as<uint32_t>();
         }
 
         config_ = new_config;

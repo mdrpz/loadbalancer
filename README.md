@@ -135,6 +135,7 @@ timeouts:
 - **IP Filtering** - Whitelist/blacklist IP addresses for security
 - **HTTP Error Responses** - Proper HTTP error responses when rejecting connections
 - **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests
+- **Connection Rate Limiting** - Limit connections per IP address to prevent abuse
 
 ## Architecture
 
@@ -300,6 +301,26 @@ http_headers:
       - "X-Original-Header"
 ```
 
+## Connection Rate Limiting
+
+The load balancer can limit the number of connections per IP address within a time window. This helps prevent abuse and DDoS attacks by limiting how many connections a single IP can establish.
+
+Configure in `config.yaml`:
+
+```yaml
+rate_limit:
+  enabled: true
+  max_connections: 100  # Max connections per IP
+  window_seconds: 60     # Time window in seconds
+```
+
+**Behavior:**
+- **Sliding Window**: Counts connections within the last N seconds (sliding window)
+- **Per-IP**: Each IP address is tracked separately
+- **Automatic Cleanup**: Old connection timestamps are automatically removed
+- **HTTP Mode**: Rejected connections receive HTTP 429 Too Many Requests response
+- **TCP Mode**: Rejected connections are simply closed
+
 ## Metrics
 
 Prometheus metrics are served at http://localhost:9090/metrics
@@ -321,6 +342,8 @@ The following metrics are available:
 `lb_backend_errors_total{backend="..."}` (counter): Number of errors per backend.
 
 `lb_request_timeouts_total` (counter): Number of timed out requests.
+
+`lb_rate_limit_drops_total` (counter): Number of connections dropped due to rate limiting.
 
 `lb_overload_drops_total` (counter): Number of requests dropped due to overload.
 

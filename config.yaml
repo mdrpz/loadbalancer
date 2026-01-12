@@ -61,3 +61,8 @@ http_headers:
       # X-LB-Version: "1.0"
     remove:
       # - "User-Agent"
+
+rate_limit:
+  enabled: true
+  max_connections: 100
+  window_seconds: 60

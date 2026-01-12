@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -171,6 +172,7 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                     pool_manager_->evict_expired();
                 }
                 check_request_timeouts();
+                cleanup_rate_limit_entries();
             },
             1000);
     }
@@ -539,6 +541,62 @@ void LoadBalancer::send_http_error_and_close(int client_fd,
     ::close(client_fd);
 }
 
+bool LoadBalancer::check_rate_limit(const std::string& client_ip,
+                                    const std::shared_ptr<const lb::config::Config>& config) {
+    if (!config || !config->rate_limit_enabled || client_ip.empty() || client_ip == "unknown")
+        return true;
+
+    auto now = std::chrono::steady_clock::now();
+    auto window = std::chrono::seconds(config->rate_limit_window_seconds);
+    auto cutoff_time = now - window;
+
+    std::lock_guard<std::mutex> lock(rate_limit_mutex_);
+
+    auto& timestamps = rate_limit_tracker_[client_ip];
+
+    timestamps.erase(std::remove_if(timestamps.begin(), timestamps.end(),
+                                    [cutoff_time](const auto& ts) { return ts < cutoff_time; }),
+                     timestamps.end());
+
+    if (timestamps.size() >= config->rate_limit_max_connections) {
+        lb::logging::Logger::instance().warn(
+            "Connection rate limit exceeded for IP " + client_ip + " (" +
+            std::to_string(timestamps.size()) + " connections in last " +
+            std::to_string(config->rate_limit_window_seconds) + " seconds)");
+        return false;
+    }
+
+    timestamps.push_back(now);
+    return true;
+}
+
+void LoadBalancer::cleanup_rate_limit_entries() {
+    auto config = config_manager_ ? config_manager_->get_config() : nullptr;
+    if (!config || !config->rate_limit_enabled)
+        return;
+
+    auto now = std::chrono::steady_clock::now();
+    auto window = std::chrono::seconds(config->rate_limit_window_seconds);
+    auto cutoff_time = now - window;
+
+    std::lock_guard<std::mutex> lock(rate_limit_mutex_);
+
+    auto it = rate_limit_tracker_.begin();
+    while (it != rate_limit_tracker_.end()) {
+        auto& timestamps = it->second;
+
+        timestamps.erase(std::remove_if(timestamps.begin(), timestamps.end(),
+                                        [cutoff_time](const auto& ts) { return ts < cutoff_time; }),
+                         timestamps.end());
+
+        if (timestamps.empty()) {
+            it = rate_limit_tracker_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void LoadBalancer::handle_accept() {
     while (true) {
         int client_fd = listener_->accept();
@@ -561,6 +619,19 @@ void LoadBalancer::handle_accept() {
             if (config && config->mode == "http") {
                 lb::http::HttpResponse error_resp =
                     lb::http::HttpResponse::forbidden("IP address not allowed");
+                send_http_error_and_close(client_fd, error_resp);
+            } else {
+                ::close(client_fd);
+            }
+            continue;
+        }
+
+        if (!check_rate_limit(client_ip, config)) {
+            lb::metrics::Metrics::instance().increment_rate_limit_drops();
+
+            if (config && config->mode == "http") {
+                lb::http::HttpResponse error_resp =
+                    lb::http::HttpResponse::too_many_requests("Rate limit exceeded");
                 send_http_error_and_close(client_fd, error_resp);
             } else {
                 ::close(client_fd);
