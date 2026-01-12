@@ -240,7 +240,9 @@ python3 -m ruff format check --fix .
 
 ## Zero-Copy Mode (Experimental)
 
-> Has issues with concurrent connections. Use `use_splice: false` for production.
+The load balancer can use Linux's `splice()` system call for zero-copy data transfer, reducing CPU overhead by avoiding user-space copies.
+
+Configure in `config.yaml`:
 
 ```yaml
 listener:
@@ -248,17 +250,29 @@ listener:
   use_splice: true  # Linux only, TCP mode only
 ```
 
+**Behavior:**
+- **Linux Only**: Requires Linux kernel (uses `splice()` system call)
+- **TCP Mode Only**: Only works in TCP mode, not HTTP mode
+- **Zero-Copy**: Data is transferred directly between file descriptors without copying to user space
+- **Experimental**: Has issues with concurrent connections; use `use_splice: false` for production
+
 ## Access Logging
 
-Access logs are written in combined log format (similar to nginx/Apache). Each HTTP request is logged with client IP, method, path, status code, bytes transferred, latency, and backend server.
+The load balancer logs HTTP requests in combined log format (similar to nginx/Apache). Each request is logged with client IP, method, path, status code, bytes transferred, latency, and backend server.
 
-Logs are written asynchronously to avoid blocking the event loop. Configure in `config.yaml`:
+Configure in `config.yaml`:
 
 ```yaml
 logging:
   access_log_enabled: true
   access_log_file: "/tmp/lb_access.log"
 ```
+
+**Behavior:**
+- **Combined Format**: Logs follow standard combined log format (client IP, timestamp, method, path, status, bytes, latency, backend)
+- **Asynchronous**: Logs are written asynchronously to avoid blocking the event loop
+- **Per-Request**: Each HTTP request is logged when its response completes
+- **Keep-Alive Support**: Multiple requests on the same connection are logged separately
 
 ## Request Timeouts
 
@@ -271,7 +285,11 @@ timeouts:
   request_ms: 5000  # Close connections after 5 seconds
 ```
 
-Timed-out requests are tracked in the `lb_request_timeouts_total` metric.
+**Behavior:**
+- **Per-Connection**: Timeout is measured from connection establishment
+- **Automatic Cleanup**: Connections exceeding the timeout are automatically closed
+- **Periodic Checking**: Timeouts are checked every second
+- **Metrics**: Timed-out requests are tracked in the `lb_request_timeouts_total` metric
 
 ## IP Filtering
 
@@ -282,6 +300,13 @@ ip_filter:
   whitelist: []  # Empty = disabled. If non-empty, only these IPs are allowed
   blacklist: []  # Empty = disabled. These IPs are always rejected
 ```
+
+**Behavior:**
+- **Blacklist First**: Blacklist is checked first; blacklisted IPs are always rejected
+- **Whitelist**: If non-empty, only whitelisted IPs are allowed (all others rejected)
+- **Empty Lists**: Empty lists mean disabled (all IPs allowed except blacklisted)
+- **HTTP Mode**: Rejected connections receive HTTP 403 Forbidden response
+- **TCP Mode**: Rejected connections are simply closed
 
 ## Custom HTTP Headers
 
@@ -300,6 +325,12 @@ http_headers:
       - "User-Agent"
       - "X-Original-Header"
 ```
+
+**Behavior:**
+- **Add/Overwrite**: Headers are added or overwritten if they already exist (case-insensitive matching)
+- **Remove First**: Headers are removed first, then added/modified
+- **Case-Insensitive**: Header name matching is case-insensitive (e.g., "user-agent" matches "User-Agent")
+- **Hot Reload**: Header modifications update on config reload without restart
 
 ## Connection Rate Limiting
 
