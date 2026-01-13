@@ -198,6 +198,10 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
         return false;
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
+    if (backend_connector_) {
+        backend_connector_->set_max_connections_per_backend(max_connections_per_backend_);
+    }
+
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
     request_timeout_ms_ = config->request_timeout_ms;
     mode_ = config->mode.empty() ? "tcp" : config->mode;
@@ -376,16 +380,17 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         if (config->listen_host != previous_config->listen_host ||
             config->listen_port != previous_config->listen_port) {
             lb::logging::Logger::instance().warn(
-                "Listener host/port changes (host: \"" + config->listen_host + "\", port: " +
-                std::to_string(config->listen_port) +
+                "Listener host/port changes (host: \"" + config->listen_host +
+                "\", port: " + std::to_string(config->listen_port) +
                 ") require a restart to take effect. Current settings remain active.");
         }
 
         std::string new_mode = config->mode.empty() ? "tcp" : config->mode;
         if (new_mode != mode_) {
-            lb::logging::Logger::instance().warn(
-                "Mode change detected in config (current: \"" + mode_ + "\", new: \"" + new_mode +
-                "\"). Mode changes require a restart to take effect. Current mode will remain active.");
+            lb::logging::Logger::instance().warn("Mode change detected in config (current: \"" +
+                                                 mode_ + "\", new: \"" + new_mode +
+                                                 "\"). Mode changes require a restart to take "
+                                                 "effect. Current mode will remain active.");
         }
 
         if (config->tls_enabled != previous_config->tls_enabled ||
@@ -416,7 +421,8 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
             config->health_check_timeout_ms != previous_config->health_check_timeout_ms ||
             config->health_check_failure_threshold !=
                 previous_config->health_check_failure_threshold ||
-            config->health_check_success_threshold != previous_config->health_check_success_threshold ||
+            config->health_check_success_threshold !=
+                previous_config->health_check_success_threshold ||
             config->health_check_type != previous_config->health_check_type) {
             lb::logging::Logger::instance().warn(
                 "Health check settings changes require a restart to take effect. Current health "
@@ -440,9 +446,9 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         }
 
         if (config->thread_pool_worker_count != previous_config->thread_pool_worker_count) {
-            lb::logging::Logger::instance().warn(
-                "Thread pool worker count changes require a restart to take effect. Current setting "
-                "remains active.");
+            lb::logging::Logger::instance().warn("Thread pool worker count changes require a "
+                                                 "restart to take effect. Current setting "
+                                                 "remains active.");
         }
 
         if (config->global_buffer_budget_mb != previous_config->global_buffer_budget_mb) {
@@ -464,8 +470,8 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         }
         if (backend_pool_->algorithm() != new_algorithm) {
             backend_pool_->set_algorithm(new_algorithm);
-            lb::logging::Logger::instance().info(
-                "Routing algorithm updated to: " + config->routing_algorithm);
+            lb::logging::Logger::instance().info("Routing algorithm updated to: " +
+                                                 config->routing_algorithm);
         }
     }
 
@@ -727,14 +733,41 @@ void LoadBalancer::try_dequeue_clients() {
         pending_clients_.pop_front();
 
         auto client_conn = std::make_unique<net::Connection>(qc.fd);
-        client_conn->set_state(net::ConnectionState::ESTABLISHED);
-        int client_fd_stored = client_conn->fd();
-        connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
 
         lb::metrics::Metrics::instance().increment_connections_total();
         lb::logging::Logger::instance().info("Dequeued connection from IP " + qc.client_ip);
 
-        backend_connector_->connect(std::move(client_conn), 0);
+        if (tls_context_ && tls_context_->is_initialized()) {
+            SSL* ssl = tls_context_->create_ssl(qc.fd);
+            if (!ssl) {
+                lb::logging::Logger::instance().error(
+                    "Failed to create SSL object for dequeued connection (fd=" +
+                    std::to_string(qc.fd) + ")");
+                ::close(qc.fd);
+                continue;
+            }
+
+            client_conn->set_ssl(ssl);
+            client_conn->set_state(net::ConnectionState::HANDSHAKE);
+            lb::logging::Logger::instance().debug(
+                "TLS connection created from queue, starting handshake (fd=" +
+                std::to_string(qc.fd) + ")");
+
+            int client_fd_stored = client_conn->fd();
+            connections_[client_fd_stored] = std::move(client_conn);
+            connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
+
+            reactor_->add_fd(client_fd_stored, EPOLLIN | EPOLLOUT,
+                             [this](int fd, net::EventType type) {
+                                 event_handlers_->handle_client_event(fd, type);
+                             });
+        } else {
+            client_conn->set_state(net::ConnectionState::ESTABLISHED);
+            int client_fd_stored = client_conn->fd();
+            connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
+
+            backend_connector_->connect(std::move(client_conn), 0);
+        }
     }
 }
 

@@ -32,6 +32,8 @@ public:
         std::function<void(int client_fd, const std::string& host, uint16_t port)>;
     void set_backend_selected_callback(BackendSelectedCallback callback);
 
+    void set_max_connections_per_backend(uint32_t max_connections);
+
     struct BackendInfo {
         std::string host;
         uint16_t port;

@@ -42,6 +42,10 @@ void BackendConnector::set_backend_selected_callback(BackendSelectedCallback cal
     backend_selected_callback_ = std::move(callback);
 }
 
+void BackendConnector::set_max_connections_per_backend(uint32_t max_connections) {
+    max_connections_per_backend_ = max_connections;
+}
+
 BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd) const {
     auto it = pooled_connections_.find(backend_fd);
     if (it != pooled_connections_.end()) {

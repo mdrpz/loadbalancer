@@ -62,7 +62,7 @@ bool ConfigManager::load_from_file(const std::string& path) {
         YAML::Node config = YAML::LoadFile(path);
 
         auto new_config = config_ ? std::make_shared<Config>(*config_) : std::make_shared<Config>();
-        
+
         if (!config_) {
             ConfigManager temp;
             *new_config = *temp.config_;
