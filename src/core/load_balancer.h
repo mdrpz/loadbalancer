@@ -5,6 +5,7 @@
 #include <mutex>
 #include <set>
 #include <unordered_map>
+#include <deque>
 #include <vector>
 #include "core/backend_connector.h"
 #include "core/backend_node.h"
@@ -101,6 +102,8 @@ private:
 
     std::string mode_;
 
+    std::shared_ptr<const lb::config::Config> last_applied_config_;
+
     std::unordered_map<std::string, std::vector<std::chrono::steady_clock::time_point>>
         rate_limit_tracker_;
     std::mutex rate_limit_mutex_;
@@ -110,7 +113,7 @@ private:
         std::string client_ip;
         std::chrono::steady_clock::time_point enqueue_time;
     };
-    std::vector<QueuedClient> pending_clients_;
+    std::deque<QueuedClient> pending_clients_;
 };
 
 } // namespace lb::core

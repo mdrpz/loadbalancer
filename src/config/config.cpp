@@ -61,7 +61,12 @@ bool ConfigManager::load_from_file(const std::string& path) {
     try {
         YAML::Node config = YAML::LoadFile(path);
 
-        auto new_config = std::make_shared<Config>();
+        auto new_config = config_ ? std::make_shared<Config>(*config_) : std::make_shared<Config>();
+        
+        if (!config_) {
+            ConfigManager temp;
+            *new_config = *temp.config_;
+        }
 
         if (config["listener"]) {
             const auto& listener = config["listener"];
@@ -124,6 +129,7 @@ bool ConfigManager::load_from_file(const std::string& path) {
         }
 
         if (config["backends"] && config["backends"].IsSequence()) {
+            new_config->backends.clear();
             for (const auto& backend : config["backends"]) {
                 BackendConfig backend_cfg;
                 if (backend["host"])
@@ -233,11 +239,13 @@ bool ConfigManager::load_from_file(const std::string& path) {
         if (config["ip_filter"]) {
             const auto& ip_filter = config["ip_filter"];
             if (ip_filter["whitelist"] && ip_filter["whitelist"].IsSequence()) {
+                new_config->ip_whitelist.clear();
                 for (const auto& ip : ip_filter["whitelist"]) {
                     new_config->ip_whitelist.push_back(ip.as<std::string>());
                 }
             }
             if (ip_filter["blacklist"] && ip_filter["blacklist"].IsSequence()) {
+                new_config->ip_blacklist.clear();
                 for (const auto& ip : ip_filter["blacklist"]) {
                     new_config->ip_blacklist.push_back(ip.as<std::string>());
                 }
@@ -248,6 +256,7 @@ bool ConfigManager::load_from_file(const std::string& path) {
             const auto& request_headers = config["http_headers"]["request"];
 
             if (request_headers["add"] && request_headers["add"].IsMap()) {
+                new_config->http_request_headers_add.clear();
                 for (const auto& item : request_headers["add"]) {
                     std::string key = item.first.as<std::string>();
                     std::string value = item.second.as<std::string>();
@@ -256,6 +265,7 @@ bool ConfigManager::load_from_file(const std::string& path) {
             }
 
             if (request_headers["remove"] && request_headers["remove"].IsSequence()) {
+                new_config->http_request_headers_remove.clear();
                 for (const auto& header : request_headers["remove"]) {
                     new_config->http_request_headers_remove.push_back(header.as<std::string>());
                 }

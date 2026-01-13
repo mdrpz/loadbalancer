@@ -360,6 +360,8 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
             "Request timeout enabled: " + std::to_string(request_timeout_ms_) + "ms");
     }
 
+    last_applied_config_ = config;
+
     return true;
 }
 
@@ -369,16 +371,103 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
 
     lb::logging::Logger::instance().info("Applying configuration reload");
 
-    std::string new_mode = config->mode.empty() ? "tcp" : config->mode;
-    if (new_mode != mode_) {
-        lb::logging::Logger::instance().warn(
-            "Mode change detected in config (current: \"" + mode_ + "\", new: \"" + new_mode +
-            "\"). Mode changes require a restart to take effect. Current mode will remain active.");
+    auto previous_config = last_applied_config_;
+    if (previous_config) {
+        if (config->listen_host != previous_config->listen_host ||
+            config->listen_port != previous_config->listen_port) {
+            lb::logging::Logger::instance().warn(
+                "Listener host/port changes (host: \"" + config->listen_host + "\", port: " +
+                std::to_string(config->listen_port) +
+                ") require a restart to take effect. Current settings remain active.");
+        }
+
+        std::string new_mode = config->mode.empty() ? "tcp" : config->mode;
+        if (new_mode != mode_) {
+            lb::logging::Logger::instance().warn(
+                "Mode change detected in config (current: \"" + mode_ + "\", new: \"" + new_mode +
+                "\"). Mode changes require a restart to take effect. Current mode will remain active.");
+        }
+
+        if (config->tls_enabled != previous_config->tls_enabled ||
+            config->tls_cert_path != previous_config->tls_cert_path ||
+            config->tls_key_path != previous_config->tls_key_path) {
+            lb::logging::Logger::instance().warn(
+                "TLS settings changes require a restart to take effect. Current TLS configuration "
+                "remains active.");
+        }
+
+        if (config->use_splice != previous_config->use_splice) {
+            lb::logging::Logger::instance().warn(
+                "Zero-copy splice mode changes require a restart to take effect. Current setting "
+                "remains active.");
+        }
+
+        if (config->connection_pool_enabled != previous_config->connection_pool_enabled ||
+            config->pool_min_connections != previous_config->pool_min_connections ||
+            config->pool_max_connections != previous_config->pool_max_connections ||
+            config->pool_idle_timeout_ms != previous_config->pool_idle_timeout_ms ||
+            config->pool_connect_timeout_ms != previous_config->pool_connect_timeout_ms) {
+            lb::logging::Logger::instance().warn(
+                "Connection pool settings changes require a restart to take effect. Current pool "
+                "configuration remains active.");
+        }
+
+        if (config->health_check_interval_ms != previous_config->health_check_interval_ms ||
+            config->health_check_timeout_ms != previous_config->health_check_timeout_ms ||
+            config->health_check_failure_threshold !=
+                previous_config->health_check_failure_threshold ||
+            config->health_check_success_threshold != previous_config->health_check_success_threshold ||
+            config->health_check_type != previous_config->health_check_type) {
+            lb::logging::Logger::instance().warn(
+                "Health check settings changes require a restart to take effect. Current health "
+                "check configuration remains active.");
+        }
+
+        if (config->log_level != previous_config->log_level ||
+            config->log_file != previous_config->log_file ||
+            config->access_log_enabled != previous_config->access_log_enabled ||
+            config->access_log_file != previous_config->access_log_file) {
+            lb::logging::Logger::instance().warn(
+                "Logging settings changes require a restart to take effect. Current logging "
+                "configuration remains active.");
+        }
+
+        if (config->metrics_enabled != previous_config->metrics_enabled ||
+            config->metrics_port != previous_config->metrics_port) {
+            lb::logging::Logger::instance().warn(
+                "Metrics settings changes require a restart to take effect. Current metrics "
+                "configuration remains active.");
+        }
+
+        if (config->thread_pool_worker_count != previous_config->thread_pool_worker_count) {
+            lb::logging::Logger::instance().warn(
+                "Thread pool worker count changes require a restart to take effect. Current setting "
+                "remains active.");
+        }
+
+        if (config->global_buffer_budget_mb != previous_config->global_buffer_budget_mb) {
+            lb::logging::Logger::instance().warn(
+                "Global buffer budget changes require a restart to take effect. Current setting "
+                "remains active.");
+        }
     }
 
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
+    request_timeout_ms_ = config->request_timeout_ms;
+
+    if (backend_pool_) {
+        RoutingAlgorithm new_algorithm = RoutingAlgorithm::ROUND_ROBIN;
+        if (config->routing_algorithm == "least_connections") {
+            new_algorithm = RoutingAlgorithm::LEAST_CONNECTIONS;
+        }
+        if (backend_pool_->algorithm() != new_algorithm) {
+            backend_pool_->set_algorithm(new_algorithm);
+            lb::logging::Logger::instance().info(
+                "Routing algorithm updated to: " + config->routing_algorithm);
+        }
+    }
 
     backpressure_manager_ =
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
@@ -428,6 +517,8 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         }
     }
     cleanup_drained_backends();
+
+    last_applied_config_ = config;
 }
 
 void LoadBalancer::cleanup_drained_backends() {
@@ -633,7 +724,7 @@ void LoadBalancer::try_dequeue_clients() {
     while (!pending_clients_.empty() &&
            connection_manager_->count_established_connections() < max_global_connections_) {
         QueuedClient qc = pending_clients_.front();
-        pending_clients_.erase(pending_clients_.begin());
+        pending_clients_.pop_front();
 
         auto client_conn = std::make_unique<net::Connection>(qc.fd);
         client_conn->set_state(net::ConnectionState::ESTABLISHED);

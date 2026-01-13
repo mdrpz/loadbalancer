@@ -56,11 +56,12 @@ backends:
 ### Load Testing
 
 **Important:** The load generator mode must be compatible with the listener mode in `config.yaml`:
+- **Load generator defaults to HTTP mode** (does not read `config.yaml`). Use `--tcp` flag for TCP mode.
 - **LB in TCP mode** (`mode: "tcp"`): Use `--tcp` flag. Sends raw TCP bytes; no HTTP parsing/metrics/access logs.
 - **LB in HTTP mode** (`mode: "http"`): Use default (HTTP) or `--http` flag. Sends HTTP requests; full HTTP parsing/metrics/access logs.
 
 ```bash
-# HTTP mode - config.yaml must have mode: "http"
+# HTTP mode (default) - config.yaml must have mode: "http"
 ./bench/load_generator 127.0.0.1 8080 -c 100 -d 10
 
 # TCP mode - use --tcp flag and config.yaml must have mode: "tcp"
