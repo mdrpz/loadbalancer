@@ -352,6 +352,27 @@ rate_limit:
 - **HTTP Mode**: Rejected connections receive HTTP 429 Too Many Requests response
 - **TCP Mode**: Rejected connections are simply closed
 
+## Request Queuing
+
+The load balancer can queue incoming connections when the global connection limit is reached, instead of immediately rejecting them. This helps smooth out short bursts of traffic.
+
+Configure in `config.yaml`:
+
+```yaml
+queue:
+  enabled: true
+  max_queue_size: 1024
+  max_wait_ms: 5000
+```
+
+**Behavior:**
+- **Global Limit**: Queues connections when `max_global_connections` is reached
+- **FIFO Queue**: Connections are served in the order they were queued
+- **Max Queue Size**: New connections are dropped when the queue is full
+- **Queue Timeout**: Queued connections are dropped if they wait longer than `max_wait_ms`
+- **HTTP Mode**: Dropped queued connections receive HTTP 503 Service Unavailable
+- **TCP Mode**: Dropped queued connections are simply closed
+
 ## Metrics
 
 Prometheus metrics are served at http://localhost:9090/metrics

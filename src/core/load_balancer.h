@@ -57,6 +57,7 @@ private:
     bool check_rate_limit(const std::string& client_ip,
                           const std::shared_ptr<const lb::config::Config>& config);
     void cleanup_rate_limit_entries();
+    void try_dequeue_clients();
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -103,6 +104,13 @@ private:
     std::unordered_map<std::string, std::vector<std::chrono::steady_clock::time_point>>
         rate_limit_tracker_;
     std::mutex rate_limit_mutex_;
+
+    struct QueuedClient {
+        int fd;
+        std::string client_ip;
+        std::chrono::steady_clock::time_point enqueue_time;
+    };
+    std::vector<QueuedClient> pending_clients_;
 };
 
 } // namespace lb::core

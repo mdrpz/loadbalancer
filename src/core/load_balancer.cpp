@@ -173,6 +173,7 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                 }
                 check_request_timeouts();
                 cleanup_rate_limit_entries();
+                try_dequeue_clients();
             },
             1000);
     }
@@ -597,6 +598,55 @@ void LoadBalancer::cleanup_rate_limit_entries() {
     }
 }
 
+void LoadBalancer::try_dequeue_clients() {
+    auto config = config_manager_ ? config_manager_->get_config() : nullptr;
+    if (!config || !config->queue_enabled || config->queue_max_size == 0)
+        return;
+
+    auto now = std::chrono::steady_clock::now();
+
+    auto it = pending_clients_.begin();
+    while (it != pending_clients_.end()) {
+        auto elapsed_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - it->enqueue_time).count();
+        if (config->queue_max_wait_ms > 0 &&
+            elapsed_ms >= static_cast<int64_t>(config->queue_max_wait_ms)) {
+            lb::metrics::Metrics::instance().increment_queue_drops();
+            lb::logging::Logger::instance().warn("Queued connection from IP " + it->client_ip +
+                                                 " dropped due to queue timeout (" +
+                                                 std::to_string(elapsed_ms) + "ms)");
+
+            if (config->mode == "http") {
+                lb::http::HttpResponse error_resp = lb::http::HttpResponse::service_unavailable(
+                    "Request timeout while waiting in queue");
+                send_http_error_and_close(it->fd, error_resp);
+            } else {
+                ::close(it->fd);
+            }
+
+            it = pending_clients_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    while (!pending_clients_.empty() &&
+           connection_manager_->count_established_connections() < max_global_connections_) {
+        QueuedClient qc = pending_clients_.front();
+        pending_clients_.erase(pending_clients_.begin());
+
+        auto client_conn = std::make_unique<net::Connection>(qc.fd);
+        client_conn->set_state(net::ConnectionState::ESTABLISHED);
+        int client_fd_stored = client_conn->fd();
+        connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
+
+        lb::metrics::Metrics::instance().increment_connections_total();
+        lb::logging::Logger::instance().info("Dequeued connection from IP " + qc.client_ip);
+
+        backend_connector_->connect(std::move(client_conn), 0);
+    }
+}
+
 void LoadBalancer::handle_accept() {
     while (true) {
         int client_fd = listener_->accept();
@@ -641,6 +691,15 @@ void LoadBalancer::handle_accept() {
 
         size_t established_count = connection_manager_->count_established_connections();
         if (established_count >= max_global_connections_) {
+            if (config && config->queue_enabled &&
+                pending_clients_.size() < config->queue_max_size) {
+                auto now = std::chrono::steady_clock::now();
+                pending_clients_.push_back({client_fd, client_ip, now});
+                lb::logging::Logger::instance().info("Queued connection from IP " + client_ip +
+                                                     " due to global limit");
+                continue;
+            }
+
             lb::metrics::Metrics::instance().increment_overload_drops();
             lb::logging::Logger::instance().warn("Connection rejected: global connection limit (" +
                                                  std::to_string(max_global_connections_) +

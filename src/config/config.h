@@ -71,6 +71,10 @@ struct Config {
     bool rate_limit_enabled;
     uint32_t rate_limit_max_connections;
     uint32_t rate_limit_window_seconds;
+
+    bool queue_enabled;
+    uint32_t queue_max_size;
+    uint32_t queue_max_wait_ms;
 };
 
 class ConfigManager {

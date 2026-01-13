@@ -49,6 +49,9 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->rate_limit_enabled = false;
     config_->rate_limit_max_connections = 100;
     config_->rate_limit_window_seconds = 60;
+    config_->queue_enabled = false;
+    config_->queue_max_size = 0;
+    config_->queue_max_wait_ms = 0;
 }
 
 ConfigManager::~ConfigManager() = default;
@@ -268,6 +271,16 @@ bool ConfigManager::load_from_file(const std::string& path) {
                     rate_limit["max_connections"].as<uint32_t>();
             if (rate_limit["window_seconds"])
                 new_config->rate_limit_window_seconds = rate_limit["window_seconds"].as<uint32_t>();
+        }
+
+        if (config["queue"]) {
+            const auto& queue = config["queue"];
+            if (queue["enabled"])
+                new_config->queue_enabled = queue["enabled"].as<bool>();
+            if (queue["max_size"])
+                new_config->queue_max_size = queue["max_size"].as<uint32_t>();
+            if (queue["max_wait_ms"])
+                new_config->queue_max_wait_ms = queue["max_wait_ms"].as<uint32_t>();
         }
 
         config_ = new_config;

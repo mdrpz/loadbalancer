@@ -62,6 +62,11 @@ http_headers:
     remove:
       # - "User-Agent"
 
+queue:
+  enabled: true
+  max_queue_size: 1024
+  max_wait_ms: 5000
+
 rate_limit:
   enabled: true
   max_connections: 100
