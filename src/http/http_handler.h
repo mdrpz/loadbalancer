@@ -17,6 +17,11 @@ public:
         HttpRequest& request, const std::unordered_map<std::string, std::string>& headers_to_add,
         const std::vector<std::string>& headers_to_remove);
 
+    static void apply_custom_headers(
+        ParsedHttpResponse& response,
+        const std::unordered_map<std::string, std::string>& headers_to_add,
+        const std::vector<std::string>& headers_to_remove);
+
     static bool is_http_request(const std::vector<uint8_t>& buffer);
 
     static std::string extract_client_ip(int client_fd);

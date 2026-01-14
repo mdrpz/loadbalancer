@@ -44,6 +44,9 @@ public:
 
     void set_custom_header_modifier(std::function<void(lb::http::HttpRequest&)> modifier);
 
+    void set_custom_response_header_modifier(
+        std::function<void(lb::http::ParsedHttpResponse&)> modifier);
+
 private:
     net::EpollReactor& reactor_;
     std::function<void(int)> start_backpressure_;
@@ -53,11 +56,14 @@ private:
     std::function<int(int)> get_client_fd_;
     AccessLogCallback access_log_callback_;
     std::function<void(lb::http::HttpRequest&)> custom_header_modifier_;
+    std::function<void(lb::http::ParsedHttpResponse&)> custom_response_header_modifier_;
     bool is_https_;
 
     struct HttpState {
         lb::http::HttpRequestParser parser;
         bool request_parsed_;
+        lb::http::HttpResponseParser response_parser;
+        bool response_parsed_;
         std::vector<uint8_t> pending_data_;
         RequestInfo request_info;
     };
@@ -65,7 +71,10 @@ private:
     std::unordered_map<int, int> backend_to_client_map_;
 
     bool parse_and_modify_http_request(net::Connection* conn, int fd);
+    bool parse_and_modify_http_response(net::Connection* conn, int client_fd);
     static std::vector<uint8_t> serialize_http_request(const lb::http::HttpRequest& request);
+    static std::vector<uint8_t> serialize_http_response(
+        const lb::http::ParsedHttpResponse& response);
 };
 
 } // namespace lb::core

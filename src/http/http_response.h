@@ -4,8 +4,54 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "http/http_request.h"
 
 namespace lb::http {
+
+struct ParsedHttpResponse {
+    ParsedHttpResponse();
+
+    int status_code;
+    std::string reason_phrase;
+    HttpVersion version;
+    std::unordered_map<std::string, std::string> headers;
+    std::vector<uint8_t> body;
+};
+
+class HttpResponseParser {
+public:
+    HttpResponseParser();
+
+    bool parse(const std::vector<uint8_t>& buffer, size_t& consumed);
+
+    [[nodiscard]] const ParsedHttpResponse& response() const {
+        return response_;
+    }
+
+    void reset();
+
+    [[nodiscard]] bool has_error() const {
+        return has_error_;
+    }
+
+    [[nodiscard]] std::string error_message() const {
+        return error_message_;
+    }
+
+private:
+    enum class ParseState { STATUS_LINE, HEADERS, BODY, COMPLETE, ERROR };
+
+    bool parse_status_line(const std::string& line);
+    bool parse_header(const std::string& line);
+    bool parse_body(const std::vector<uint8_t>& buffer, size_t& consumed);
+
+    ParsedHttpResponse response_;
+    ParseState state_;
+    bool has_error_;
+    std::string error_message_;
+    size_t content_length_;
+    std::string current_line_;
+};
 
 enum class HttpStatusCode {
     OK = 200,

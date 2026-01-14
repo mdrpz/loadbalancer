@@ -63,12 +63,18 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
     } else {
         int client_fd = get_client_fd_ ? get_client_fd_(from_fd) : 0;
         if (client_fd > 0) {
-            auto it = http_states_.find(client_fd);
-            if (it != http_states_.end() && it->second.request_info.status_code == 0) {
-                if (read_buf.size() >= 12 && read_buf[0] == 'H' && read_buf[1] == 'T' &&
-                    read_buf[2] == 'T' && read_buf[3] == 'P') {
-                    parse_response_status(client_fd, read_buf);
+            auto& state = http_states_[client_fd];
+
+            if (!state.response_parsed_) {
+                if (parse_and_modify_http_response(from, client_fd)) {
+                    state.response_parsed_ = true;
+                } else {
+                    return;
                 }
+            }
+
+            if (state.request_info.status_code == 0) {
+                parse_response_status(client_fd, read_buf);
             }
         }
     }
@@ -126,7 +132,9 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
 
                         it->second.request_info = RequestInfo{};
                         it->second.request_parsed_ = false;
+                        it->second.response_parsed_ = false;
                         it->second.parser.reset();
+                        it->second.response_parser.reset();
                     }
                 }
             }
@@ -271,6 +279,59 @@ void HttpDataForwarder::set_custom_header_modifier(
     } else {
         custom_header_modifier_ = nullptr;
     }
+}
+
+void HttpDataForwarder::set_custom_response_header_modifier(
+    std::function<void(lb::http::ParsedHttpResponse&)> modifier) {
+    if (modifier) {
+        custom_response_header_modifier_ = std::move(modifier);
+    } else {
+        custom_response_header_modifier_ = nullptr;
+    }
+}
+
+bool HttpDataForwarder::parse_and_modify_http_response(net::Connection* conn, int client_fd) {
+    auto& read_buf = conn->read_buffer();
+    auto& state = http_states_[client_fd];
+
+    size_t consumed = 0;
+    if (state.response_parser.parse(read_buf, consumed)) {
+        auto& response =
+            const_cast<lb::http::ParsedHttpResponse&>(state.response_parser.response());
+
+        if (custom_response_header_modifier_) {
+            custom_response_header_modifier_(response);
+        }
+
+        auto modified_response = serialize_http_response(response);
+
+        read_buf = std::move(modified_response);
+
+        return true;
+    }
+
+    return false;
+}
+
+std::vector<uint8_t> HttpDataForwarder::serialize_http_response(
+    const lb::http::ParsedHttpResponse& response) {
+    std::ostringstream oss;
+
+    oss << "HTTP/" << lb::http::version_to_string(response.version) << " " << response.status_code
+        << " " << response.reason_phrase << "\r\n";
+
+    for (const auto& [name, value] : response.headers) {
+        oss << name << ": " << value << "\r\n";
+    }
+
+    oss << "\r\n";
+
+    if (!response.body.empty()) {
+        oss.write(reinterpret_cast<const char*>(response.body.data()), response.body.size());
+    }
+
+    std::string str = oss.str();
+    return std::vector<uint8_t>(str.begin(), str.end());
 }
 
 } // namespace lb::core

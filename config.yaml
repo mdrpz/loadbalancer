@@ -61,6 +61,13 @@ http_headers:
       # X-LB-Version: "1.0"
     remove:
       # - "User-Agent"
+  response:
+    add:
+      # X-Frame-Options: "DENY"
+      # X-Content-Type-Options: "nosniff"
+      # X-XSS-Protection: "1; mode=block"
+    remove:
+      # - "Server"
 
 queue:
   enabled: true

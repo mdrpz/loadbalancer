@@ -92,6 +92,68 @@ void HttpHandler::apply_custom_headers(
     }
 }
 
+void HttpHandler::apply_custom_headers(
+    ParsedHttpResponse& response,
+    const std::unordered_map<std::string, std::string>& headers_to_add,
+    const std::vector<std::string>& headers_to_remove) {
+    for (const auto& header_name : headers_to_remove) {
+        auto it = response.headers.begin();
+        while (it != response.headers.end()) {
+            std::string key_lower = it->first;
+            std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+            std::string target_lower = header_name;
+            std::transform(target_lower.begin(), target_lower.end(), target_lower.begin(),
+                           [](unsigned char c) { return std::tolower(c); });
+
+            if (key_lower == target_lower) {
+                it = response.headers.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    for (const auto& [name, value] : headers_to_add) {
+        if (value.empty()) {
+            auto it = response.headers.begin();
+            while (it != response.headers.end()) {
+                std::string key_lower = it->first;
+                std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+                std::string target_lower = name;
+                std::transform(target_lower.begin(), target_lower.end(), target_lower.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+
+                if (key_lower == target_lower) {
+                    it = response.headers.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        } else {
+            bool found = false;
+            for (auto& [key, val] : response.headers) {
+                std::string key_lower = key;
+                std::transform(key_lower.begin(), key_lower.end(), key_lower.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+                std::string target_lower = name;
+                std::transform(target_lower.begin(), target_lower.end(), target_lower.begin(),
+                               [](unsigned char c) { return std::tolower(c); });
+
+                if (key_lower == target_lower) {
+                    val = value;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                response.headers[name] = value;
+            }
+        }
+    }
+}
+
 bool HttpHandler::is_http_request(const std::vector<uint8_t>& buffer) {
     if (buffer.size() < 4)
         return false;

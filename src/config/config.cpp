@@ -46,6 +46,8 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->ip_blacklist.clear();
     config_->http_request_headers_add.clear();
     config_->http_request_headers_remove.clear();
+    config_->http_response_headers_add.clear();
+    config_->http_response_headers_remove.clear();
     config_->rate_limit_enabled = false;
     config_->rate_limit_max_connections = 100;
     config_->rate_limit_window_seconds = 60;
@@ -268,6 +270,26 @@ bool ConfigManager::load_from_file(const std::string& path) {
                 new_config->http_request_headers_remove.clear();
                 for (const auto& header : request_headers["remove"]) {
                     new_config->http_request_headers_remove.push_back(header.as<std::string>());
+                }
+            }
+        }
+
+        if (config["http_headers"] && config["http_headers"]["response"]) {
+            const auto& response_headers = config["http_headers"]["response"];
+
+            if (response_headers["add"] && response_headers["add"].IsMap()) {
+                new_config->http_response_headers_add.clear();
+                for (const auto& item : response_headers["add"]) {
+                    std::string key = item.first.as<std::string>();
+                    std::string value = item.second.as<std::string>();
+                    new_config->http_response_headers_add[key] = value;
+                }
+            }
+
+            if (response_headers["remove"] && response_headers["remove"].IsSequence()) {
+                new_config->http_response_headers_remove.clear();
+                for (const auto& header : response_headers["remove"]) {
+                    new_config->http_response_headers_remove.push_back(header.as<std::string>());
                 }
             }
         }

@@ -311,7 +311,7 @@ ip_filter:
 
 ## Custom HTTP Headers
 
-The load balancer can add, modify, or remove HTTP headers in requests before forwarding them to backends. This is useful for adding security headers, custom routing headers, or removing sensitive information.
+The load balancer can add, modify, or remove HTTP headers in both requests (before forwarding to backends) and responses (before sending to clients). This is useful for adding security headers, custom routing headers, or removing sensitive information.
 
 Configure in `config.yaml`:
 
@@ -325,9 +325,18 @@ http_headers:
     remove:
       - "User-Agent"
       - "X-Original-Header"
+  response:
+    add:
+      X-Frame-Options: "DENY"
+      X-Content-Type-Options: "nosniff"
+      X-XSS-Protection: "1; mode=block"
+    remove:
+      - "Server"
 ```
 
 **Behavior:**
+- **Request Headers**: Modified before forwarding to backends
+- **Response Headers**: Modified before sending to clients
 - **Add/Overwrite**: Headers are added or overwritten if they already exist (case-insensitive matching)
 - **Remove First**: Headers are removed first, then added/modified
 - **Case-Insensitive**: Header name matching is case-insensitive (e.g., "user-agent" matches "User-Agent")

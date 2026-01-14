@@ -242,6 +242,17 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
                                                                     headers_to_remove);
                     });
             }
+
+            auto response_headers_to_add = config->http_response_headers_add;
+            auto response_headers_to_remove = config->http_response_headers_remove;
+            if (!response_headers_to_add.empty() || !response_headers_to_remove.empty()) {
+                http_data_forwarder_->set_custom_response_header_modifier(
+                    [response_headers_to_add,
+                     response_headers_to_remove](lb::http::ParsedHttpResponse& response) {
+                        lb::http::HttpHandler::apply_custom_headers(
+                            response, response_headers_to_add, response_headers_to_remove);
+                    });
+            }
         }
 
         if (http_data_forwarder_) {
@@ -489,6 +500,19 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
                 });
         } else {
             http_data_forwarder_->set_custom_header_modifier(nullptr);
+        }
+
+        auto response_headers_to_add = config->http_response_headers_add;
+        auto response_headers_to_remove = config->http_response_headers_remove;
+        if (!response_headers_to_add.empty() || !response_headers_to_remove.empty()) {
+            http_data_forwarder_->set_custom_response_header_modifier(
+                [response_headers_to_add,
+                 response_headers_to_remove](lb::http::ParsedHttpResponse& response) {
+                    lb::http::HttpHandler::apply_custom_headers(response, response_headers_to_add,
+                                                                response_headers_to_remove);
+                });
+        } else {
+            http_data_forwarder_->set_custom_response_header_modifier(nullptr);
         }
     }
 

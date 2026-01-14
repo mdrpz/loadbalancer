@@ -49,6 +49,7 @@ add_library(lb_lib STATIC
     src/logging/access_logger.cpp
     src/http/http_request.cpp
     src/http/http_response.cpp
+    src/http/http_response_parser.cpp
     src/http/http_handler.cpp
     src/core/http_data_forwarder.cpp
     src/core/splice_forwarder.cpp

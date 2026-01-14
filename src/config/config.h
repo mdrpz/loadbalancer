@@ -68,6 +68,9 @@ struct Config {
     std::unordered_map<std::string, std::string> http_request_headers_add;
     std::vector<std::string> http_request_headers_remove;
 
+    std::unordered_map<std::string, std::string> http_response_headers_add;
+    std::vector<std::string> http_response_headers_remove;
+
     bool rate_limit_enabled;
     uint32_t rate_limit_max_connections;
     uint32_t rate_limit_window_seconds;
