@@ -135,7 +135,7 @@ timeouts:
 - **Request Timeouts** - Automatic connection timeout for slow clients with per-request logging
 - **IP Filtering** - Whitelist/blacklist IP addresses for security
 - **HTTP Error Responses** - Proper HTTP error responses when rejecting connections
-- **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests
+- **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests and responses
 - **Connection Rate Limiting** - Limit connections per IP address to prevent abuse
 
 ## Architecture
