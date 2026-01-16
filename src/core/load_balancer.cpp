@@ -50,7 +50,10 @@ LoadBalancer::LoadBalancer()
 
     retry_handler_ = std::make_unique<RetryHandler>(
         [this](std::unique_ptr<net::Connection> conn, int retry_count) {
-            backend_connector_->connect(std::move(conn), retry_count);
+            int client_fd = conn->fd();
+            auto it = client_session_keys_.find(client_fd);
+            std::string session_key = (it != client_session_keys_.end()) ? it->second : "";
+            backend_connector_->connect(std::move(conn), retry_count, session_key);
         });
 
     event_handlers_ = std::make_unique<EventHandlers>(
@@ -106,6 +109,8 @@ LoadBalancer::LoadBalancer()
         [this](std::unique_ptr<net::Connection> conn, int retry_count) {
             retry_handler_->retry(std::move(conn), retry_count);
         });
+
+    session_manager_ = std::make_unique<SessionManager>();
 }
 
 LoadBalancer::~LoadBalancer() {
@@ -174,6 +179,9 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                 check_request_timeouts();
                 cleanup_rate_limit_entries();
                 try_dequeue_clients();
+                if (session_manager_) {
+                    session_manager_->cleanup_expired_sessions();
+                }
             },
             1000);
     }
@@ -200,6 +208,10 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     max_connections_per_backend_ = config->max_connections_per_backend;
     if (backend_connector_) {
         backend_connector_->set_max_connections_per_backend(max_connections_per_backend_);
+        backend_connector_->set_session_manager(session_manager_.get());
+        backend_connector_->set_sticky_config(config->sticky_sessions_enabled,
+                                              config->sticky_sessions_method,
+                                              config->sticky_sessions_ttl_seconds);
     }
 
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
@@ -296,6 +308,34 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
                 auto it = backend_to_client_map_.find(backend_fd);
                 return (it != backend_to_client_map_.end()) ? it->second : 0;
             });
+
+            if (config && config->sticky_sessions_enabled &&
+                config->sticky_sessions_method == "cookie") {
+                http_data_forwarder_->set_session_key_update_callback(
+                    [this](int client_fd, const std::string& cookie_value) {
+                        client_session_keys_[client_fd] = cookie_value;
+                    },
+                    config->sticky_sessions_cookie_name);
+
+                http_data_forwarder_->set_cookie_injection_callback([this, config](int client_fd) {
+                    auto it = client_session_keys_.find(client_fd);
+                    std::string session_key;
+                    if (it != client_session_keys_.end() && !it->second.empty()) {
+                        session_key = it->second;
+                    } else {
+                        std::ostringstream oss;
+                        oss << client_fd << "_"
+                            << std::chrono::steady_clock::now().time_since_epoch().count();
+                        session_key = oss.str();
+                        client_session_keys_[client_fd] = session_key;
+                    }
+
+                    std::ostringstream cookie;
+                    cookie << config->sticky_sessions_cookie_name << "=" << session_key
+                           << "; Path=/; Max-Age=" << config->sticky_sessions_ttl_seconds;
+                    return cookie.str();
+                });
+            }
         }
 
         if (backend_connector_ && http_data_forwarder_) {
@@ -486,6 +526,12 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         }
     }
 
+    if (backend_connector_) {
+        backend_connector_->set_sticky_config(config->sticky_sessions_enabled,
+                                              config->sticky_sessions_method,
+                                              config->sticky_sessions_ttl_seconds);
+    }
+
     backpressure_manager_ =
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
 
@@ -513,6 +559,36 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
                 });
         } else {
             http_data_forwarder_->set_custom_response_header_modifier(nullptr);
+        }
+
+        if (config->sticky_sessions_enabled && config->sticky_sessions_method == "cookie") {
+            http_data_forwarder_->set_session_key_update_callback(
+                [this](int client_fd, const std::string& cookie_value) {
+                    client_session_keys_[client_fd] = cookie_value;
+                },
+                config->sticky_sessions_cookie_name);
+
+            http_data_forwarder_->set_cookie_injection_callback([this, config](int client_fd) {
+                auto it = client_session_keys_.find(client_fd);
+                std::string session_key;
+                if (it != client_session_keys_.end() && !it->second.empty()) {
+                    session_key = it->second;
+                } else {
+                    std::ostringstream oss;
+                    oss << client_fd << "_"
+                        << std::chrono::steady_clock::now().time_since_epoch().count();
+                    session_key = oss.str();
+                    client_session_keys_[client_fd] = session_key;
+                }
+
+                std::ostringstream cookie;
+                cookie << config->sticky_sessions_cookie_name << "=" << session_key
+                       << "; Path=/; Max-Age=" << config->sticky_sessions_ttl_seconds;
+                return cookie.str();
+            });
+        } else {
+            http_data_forwarder_->set_session_key_update_callback(nullptr, "");
+            http_data_forwarder_->set_cookie_injection_callback(nullptr);
         }
     }
 
@@ -790,7 +866,10 @@ void LoadBalancer::try_dequeue_clients() {
             int client_fd_stored = client_conn->fd();
             connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
 
-            backend_connector_->connect(std::move(client_conn), 0);
+            auto config = config_manager_ ? config_manager_->get_config() : nullptr;
+            std::string session_key = get_session_key(client_fd_stored, qc.client_ip, config);
+            client_session_keys_[client_fd_stored] = session_key;
+            backend_connector_->connect(std::move(client_conn), 0, session_key);
         }
     }
 }
@@ -894,9 +973,31 @@ void LoadBalancer::handle_accept() {
             client_conn->set_state(net::ConnectionState::ESTABLISHED);
             int client_fd_stored = client_conn->fd();
             connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
-            backend_connector_->connect(std::move(client_conn), 0);
+
+            std::string session_key = get_session_key(client_fd_stored, client_ip, config);
+            client_session_keys_[client_fd_stored] = session_key;
+            backend_connector_->connect(std::move(client_conn), 0, session_key);
         }
     }
+}
+
+std::string LoadBalancer::get_session_key(
+    int client_fd, const std::string& client_ip,
+    const std::shared_ptr<const lb::config::Config>& config) const {
+    if (!config || !config->sticky_sessions_enabled) {
+        return "";
+    }
+
+    if (config->sticky_sessions_method == "ip") {
+        return client_ip;
+    }
+
+    auto it = client_session_keys_.find(client_fd);
+    if (it != client_session_keys_.end() && !it->second.empty()) {
+        return it->second;
+    }
+
+    return client_ip;
 }
 
 } // namespace lb::core

@@ -18,9 +18,21 @@ void BackendPool::remove_backend(const std::string& host, uint16_t port) {
                     backends_.end());
 }
 
-std::shared_ptr<BackendNode> BackendPool::select_backend(uint32_t max_connections_per_backend) {
+std::shared_ptr<BackendNode> BackendPool::select_backend(uint32_t max_connections_per_backend,
+                                                         const std::string& sticky_host,
+                                                         uint16_t sticky_port) {
     if (backends_.empty())
         return nullptr;
+
+    if (!sticky_host.empty() && sticky_port > 0) {
+        auto sticky_backend = find_backend(sticky_host, sticky_port);
+        if (sticky_backend && sticky_backend->state() == BackendState::HEALTHY) {
+            if (max_connections_per_backend == 0 ||
+                sticky_backend->active_connections() < max_connections_per_backend) {
+                return sticky_backend;
+            }
+        }
+    }
 
     std::vector<std::shared_ptr<BackendNode>> healthy;
     for (const auto& backend : backends_) {

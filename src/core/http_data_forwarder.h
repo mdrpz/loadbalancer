@@ -47,6 +47,14 @@ public:
     void set_custom_response_header_modifier(
         std::function<void(lb::http::ParsedHttpResponse&)> modifier);
 
+    using SessionKeyUpdateCallback =
+        std::function<void(int client_fd, const std::string& session_key)>;
+    void set_session_key_update_callback(SessionKeyUpdateCallback callback,
+                                         const std::string& cookie_name);
+
+    using CookieInjectionCallback = std::function<std::string(int client_fd)>;
+    void set_cookie_injection_callback(CookieInjectionCallback callback);
+
 private:
     net::EpollReactor& reactor_;
     std::function<void(int)> start_backpressure_;
@@ -57,6 +65,9 @@ private:
     AccessLogCallback access_log_callback_;
     std::function<void(lb::http::HttpRequest&)> custom_header_modifier_;
     std::function<void(lb::http::ParsedHttpResponse&)> custom_response_header_modifier_;
+    SessionKeyUpdateCallback session_key_update_callback_;
+    std::string sticky_session_cookie_name_;
+    CookieInjectionCallback cookie_injection_callback_;
     bool is_https_;
 
     struct HttpState {

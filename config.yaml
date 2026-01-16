@@ -19,6 +19,11 @@ routing:
   algorithm: "round_robin"
   max_connections_per_backend: 100
   max_global_connections: 1000
+  sticky_sessions:
+    enabled: false
+    method: "cookie"
+    cookie_name: "LB_SESSION"
+    ttl_seconds: 3600
 
 connection_pool:
   enabled: true              # Enable connection pooling for backend connections

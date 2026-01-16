@@ -6,13 +6,29 @@ cmake-build-*/
 *.so
 *.dylib
 
+# CMake build files (in root and subdirectories)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+Makefile.cmake
+Makefile2
+*.cmake
+!CMakeLists.txt
+!**/CMakeLists.txt
+
 # Compilation database
 compile_commands.json
+compile_commands.json.tmp*
 
 # Executables
 /build/lb
 /build/bench/load_generator
 /build/tests/cpp/test_*
+/lb
+/load_generator
+*.exe
 
 # IDE
 .vscode/

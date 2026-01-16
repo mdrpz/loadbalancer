@@ -168,6 +168,7 @@ python3 -m pytest -v
 cd build && ctest
 
 # Build load generator
+cd build
 cmake .. -DBUILD_BENCH=ON && cmake --build .
 
 # Run load tests (see Backend Setup section for more examples)
@@ -382,6 +383,34 @@ queue:
 - **Queue Timeout**: Queued connections are dropped if they wait longer than `max_wait_ms`
 - **HTTP Mode**: Dropped queued connections receive HTTP 503 Service Unavailable
 - **TCP Mode**: Dropped queued connections are simply closed
+
+## Sticky Sessions / Session Affinity
+
+The load balancer can route the same client to the same backend server, ensuring session persistence for stateful applications.
+
+Configure in `config.yaml`:
+
+```yaml
+routing:
+  sticky_sessions:
+    enabled: true
+    method: "cookie"  # "cookie" or "ip"
+    cookie_name: "LB_SESSION"
+    ttl_seconds: 3600
+```
+
+**Behavior:**
+- **Cookie-Based**: Uses HTTP cookies to track sessions (HTTP mode only)
+  - Extracts session cookie from incoming requests
+  - Injects `Set-Cookie` header in responses if cookie is missing
+  - Routes to the same backend as long as the cookie is valid
+- **IP-Based**: Uses client IP address to track sessions (works for both HTTP and TCP)
+  - Routes clients from the same IP to the same backend
+  - Simpler but less reliable behind proxies/NAT
+- **Session TTL**: Sessions expire after `ttl_seconds` of inactivity
+- **Automatic Cleanup**: Expired sessions are automatically removed
+- **Fallback**: If sticky backend is unhealthy or at capacity, falls back to normal routing algorithm
+- **Hot Reload**: Sticky session settings update on config reload without restart
 
 ## Metrics
 

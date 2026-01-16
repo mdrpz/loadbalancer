@@ -53,6 +53,7 @@ add_library(lb_lib STATIC
     src/http/http_handler.cpp
     src/core/http_data_forwarder.cpp
     src/core/splice_forwarder.cpp
+    src/core/session_manager.cpp
 )
 
 target_link_libraries(lb_lib

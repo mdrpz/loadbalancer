@@ -16,7 +16,9 @@ public:
     void add_backend(const std::shared_ptr<BackendNode>& backend);
     void remove_backend(const std::string& host, uint16_t port);
 
-    std::shared_ptr<BackendNode> select_backend(uint32_t max_connections_per_backend = 0);
+    std::shared_ptr<BackendNode> select_backend(uint32_t max_connections_per_backend = 0,
+                                                const std::string& sticky_host = "",
+                                                uint16_t sticky_port = 0);
 
     void set_algorithm(RoutingAlgorithm algorithm) {
         algorithm_ = algorithm;

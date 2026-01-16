@@ -46,6 +46,17 @@ void BackendConnector::set_max_connections_per_backend(uint32_t max_connections)
     max_connections_per_backend_ = max_connections;
 }
 
+void BackendConnector::set_session_manager(SessionManager* session_manager) {
+    session_manager_ = session_manager;
+}
+
+void BackendConnector::set_sticky_config(bool enabled, const std::string& method,
+                                         uint32_t ttl_seconds) {
+    sticky_sessions_enabled_ = enabled;
+    sticky_sessions_method_ = method;
+    sticky_sessions_ttl_seconds_ = ttl_seconds;
+}
+
 BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd) const {
     auto it = pooled_connections_.find(backend_fd);
     if (it != pooled_connections_.end()) {
@@ -54,8 +65,26 @@ BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd)
     return {"", 0, false};
 }
 
-void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int retry_count) {
-    auto backend_node = backend_pool_.select_backend(max_connections_per_backend_);
+void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int retry_count,
+                               const std::string& session_key) {
+    std::shared_ptr<BackendNode> backend_node;
+    std::string sticky_host;
+    uint16_t sticky_port = 0;
+
+    if (sticky_sessions_enabled_ && session_manager_ && !session_key.empty()) {
+        auto session = session_manager_->get_session(session_key);
+        if (session.has_value()) {
+            sticky_host = session->backend_host;
+            sticky_port = session->backend_port;
+            lb::logging::Logger::instance().debug("Sticky session found for key " + session_key +
+                                                  " -> " + sticky_host + ":" +
+                                                  std::to_string(sticky_port));
+        }
+    }
+
+    backend_node =
+        backend_pool_.select_backend(max_connections_per_backend_, sticky_host, sticky_port);
+
     if (!backend_node) {
         lb::metrics::Metrics::instance().increment_backend_routes_failed();
         lb::logging::Logger::instance().warn("No healthy backend available for routing");
@@ -65,6 +94,10 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
 
     const std::string& host = backend_node->host();
     uint16_t port = backend_node->port();
+
+    if (sticky_sessions_enabled_ && session_manager_ && !session_key.empty()) {
+        session_manager_->set_session(session_key, host, port, sticky_sessions_ttl_seconds_);
+    }
 
     lb::logging::Logger::instance().debug("Routing connection to backend " + host + ":" +
                                           std::to_string(port));

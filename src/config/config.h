@@ -78,6 +78,11 @@ struct Config {
     bool queue_enabled;
     uint32_t queue_max_size;
     uint32_t queue_max_wait_ms;
+
+    bool sticky_sessions_enabled;
+    std::string sticky_sessions_method;
+    std::string sticky_sessions_cookie_name;
+    uint32_t sticky_sessions_ttl_seconds;
 };
 
 class ConfigManager {
