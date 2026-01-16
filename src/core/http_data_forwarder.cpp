@@ -170,6 +170,13 @@ bool HttpDataForwarder::parse_and_modify_http_request(net::Connection* conn, int
             custom_header_modifier_(request);
         }
 
+        if (session_key_update_callback_ && !sticky_session_cookie_name_.empty()) {
+            std::string cookie_value = request.get_cookie(sticky_session_cookie_name_);
+            if (!cookie_value.empty()) {
+                session_key_update_callback_(fd, cookie_value);
+            }
+        }
+
         auto modified_request = serialize_http_request(request);
 
         read_buf = std::move(modified_request);
@@ -290,6 +297,16 @@ void HttpDataForwarder::set_custom_response_header_modifier(
     }
 }
 
+void HttpDataForwarder::set_session_key_update_callback(SessionKeyUpdateCallback callback,
+                                                        const std::string& cookie_name) {
+    session_key_update_callback_ = std::move(callback);
+    sticky_session_cookie_name_ = cookie_name;
+}
+
+void HttpDataForwarder::set_cookie_injection_callback(CookieInjectionCallback callback) {
+    cookie_injection_callback_ = std::move(callback);
+}
+
 bool HttpDataForwarder::parse_and_modify_http_response(net::Connection* conn, int client_fd) {
     auto& read_buf = conn->read_buffer();
     auto& state = http_states_[client_fd];
@@ -301,6 +318,13 @@ bool HttpDataForwarder::parse_and_modify_http_response(net::Connection* conn, in
 
         if (custom_response_header_modifier_) {
             custom_response_header_modifier_(response);
+        }
+
+        if (cookie_injection_callback_) {
+            std::string cookie_value = cookie_injection_callback_(client_fd);
+            if (!cookie_value.empty()) {
+                response.headers["Set-Cookie"] = cookie_value;
+            }
         }
 
         auto modified_response = serialize_http_response(response);

@@ -25,6 +25,7 @@ struct HttpRequest {
     [[nodiscard]] bool has_header(const std::string& name) const;
     [[nodiscard]] std::string get_host() const;
     [[nodiscard]] std::string get_client_ip() const;
+    [[nodiscard]] std::string get_cookie(const std::string& name) const;
 };
 
 class HttpRequestParser {

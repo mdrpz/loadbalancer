@@ -17,6 +17,7 @@
 #include "core/event_handlers.h"
 #include "core/http_data_forwarder.h"
 #include "core/retry_handler.h"
+#include "core/session_manager.h"
 #include "core/splice_forwarder.h"
 #include "health/health_checker.h"
 #include "net/connection.h"
@@ -59,6 +60,8 @@ private:
                           const std::shared_ptr<const lb::config::Config>& config);
     void cleanup_rate_limit_entries();
     void try_dequeue_clients();
+    std::string get_session_key(int client_fd, const std::string& client_ip,
+                                const std::shared_ptr<const lb::config::Config>& config) const;
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -114,6 +117,9 @@ private:
         std::chrono::steady_clock::time_point enqueue_time;
     };
     std::deque<QueuedClient> pending_clients_;
+
+    std::unique_ptr<SessionManager> session_manager_;
+    std::unordered_map<int, std::string> client_session_keys_;
 };
 
 } // namespace lb::core

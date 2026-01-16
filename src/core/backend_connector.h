@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include "core/backend_pool.h"
 #include "core/connection_pool.h"
+#include "core/session_manager.h"
 #include "net/connection.h"
 #include "net/epoll_reactor.h"
 
@@ -24,9 +25,12 @@ public:
         std::function<void(int, net::EventType)> backend_handler,
         std::function<void(std::unique_ptr<net::Connection>, int)> retry_callback);
 
-    void connect(std::unique_ptr<net::Connection> client_conn, int retry_count);
+    void connect(std::unique_ptr<net::Connection> client_conn, int retry_count,
+                 const std::string& session_key = "");
 
     void set_pool_manager(ConnectionPoolManager* pool_manager);
+    void set_session_manager(SessionManager* session_manager);
+    void set_sticky_config(bool enabled, const std::string& method, uint32_t ttl_seconds);
 
     using BackendSelectedCallback =
         std::function<void(int client_fd, const std::string& host, uint16_t port)>;
@@ -57,6 +61,10 @@ private:
     ConnectionPoolManager* pool_manager_ = nullptr;
     std::unordered_map<int, BackendInfo> pooled_connections_;
     BackendSelectedCallback backend_selected_callback_;
+    SessionManager* session_manager_ = nullptr;
+    bool sticky_sessions_enabled_ = false;
+    std::string sticky_sessions_method_;
+    uint32_t sticky_sessions_ttl_seconds_ = 3600;
 };
 
 } // namespace lb::core

@@ -52,6 +52,69 @@ std::string HttpRequest::get_client_ip() const {
     return "";
 }
 
+std::string HttpRequest::get_cookie(const std::string& name) const {
+    std::string cookie_header = get_header("Cookie");
+    if (cookie_header.empty()) {
+        return "";
+    }
+
+    size_t pos = 0;
+    while (pos < cookie_header.length()) {
+        while (pos < cookie_header.length() &&
+               (cookie_header[pos] == ' ' || cookie_header[pos] == ';')) {
+            pos++;
+        }
+        if (pos >= cookie_header.length())
+            break;
+
+        size_t name_start = pos;
+        size_t equals_pos = cookie_header.find('=', pos);
+        if (equals_pos == std::string::npos)
+            break;
+
+        std::string cookie_name = cookie_header.substr(name_start, equals_pos - name_start);
+        while (!cookie_name.empty() && cookie_name[0] == ' ')
+            cookie_name.erase(0, 1);
+        while (!cookie_name.empty() && cookie_name.back() == ' ')
+            cookie_name.pop_back();
+
+        bool match = true;
+        if (cookie_name.length() == name.length()) {
+            for (size_t i = 0; i < cookie_name.length(); ++i) {
+                if (std::tolower(cookie_name[i]) != std::tolower(name[i])) {
+                    match = false;
+                    break;
+                }
+            }
+        } else {
+            match = false;
+        }
+
+        if (match) {
+            size_t value_start = equals_pos + 1;
+            while (value_start < cookie_header.length() && cookie_header[value_start] == ' ')
+                value_start++;
+
+            size_t value_end = value_start;
+            while (value_end < cookie_header.length() && cookie_header[value_end] != ';')
+                value_end++;
+
+            std::string cookie_value = cookie_header.substr(value_start, value_end - value_start);
+            while (!cookie_value.empty() && cookie_value.back() == ' ')
+                cookie_value.pop_back();
+
+            return cookie_value;
+        }
+
+        pos = cookie_header.find(';', equals_pos);
+        if (pos == std::string::npos)
+            break;
+        pos++;
+    }
+
+    return "";
+}
+
 HttpRequestParser::HttpRequestParser()
     : state_(ParseState::REQUEST_LINE), has_error_(false), content_length_(0) {}
 

@@ -54,6 +54,10 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->queue_enabled = false;
     config_->queue_max_size = 0;
     config_->queue_max_wait_ms = 0;
+    config_->sticky_sessions_enabled = false;
+    config_->sticky_sessions_method = "cookie";
+    config_->sticky_sessions_cookie_name = "LB_SESSION";
+    config_->sticky_sessions_ttl_seconds = 3600;
 }
 
 ConfigManager::~ConfigManager() = default;
@@ -154,6 +158,19 @@ bool ConfigManager::load_from_file(const std::string& path) {
             if (routing["max_global_connections"])
                 new_config->max_global_connections =
                     routing["max_global_connections"].as<uint32_t>();
+
+            if (routing["sticky_sessions"]) {
+                const auto& sticky = routing["sticky_sessions"];
+                if (sticky["enabled"])
+                    new_config->sticky_sessions_enabled = sticky["enabled"].as<bool>();
+                if (sticky["method"])
+                    new_config->sticky_sessions_method = sticky["method"].as<std::string>();
+                if (sticky["cookie_name"])
+                    new_config->sticky_sessions_cookie_name =
+                        sticky["cookie_name"].as<std::string>();
+                if (sticky["ttl_seconds"])
+                    new_config->sticky_sessions_ttl_seconds = sticky["ttl_seconds"].as<uint32_t>();
+            }
         }
 
         if (config["connection_pool"]) {
