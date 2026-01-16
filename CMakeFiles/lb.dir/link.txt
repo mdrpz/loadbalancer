@@ -1,1 +1,0 @@
-/usr/bin/c++  -Wall -Wextra -Wpedantic CMakeFiles/lb.dir/src/main.cpp.o -o lb  liblb_lib.a /usr/lib/x86_64-linux-gnu/libssl.so /usr/lib/x86_64-linux-gnu/libcrypto.so /usr/lib/x86_64-linux-gnu/libyaml-cpp.so.0.7.0 
