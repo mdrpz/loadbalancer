@@ -53,6 +53,26 @@ backends:
     port: 80
 ```
 
+### Echo Server (TCP Mode Testing)
+
+Best for: TCP mode testing, simple echo functionality, debugging
+
+The project includes a simple echo server utility for testing TCP mode:
+
+```bash
+# Start echo server on port 8000
+python3 tests/python/backend_server.py 8000
+
+# Configure in config.yaml (TCP mode)
+listener:
+  mode: "tcp"
+backends:
+  - host: "127.0.0.1"
+    port: 8000
+```
+
+The echo server will echo back any data sent to it, making it useful for testing raw TCP forwarding.
+
 ### Load Testing
 
 **Important:** The load generator mode must be compatible with the listener mode in `config.yaml`:
@@ -230,7 +250,7 @@ find src bench -name "*.cpp" -o -name "*.h" | xargs clang-format --dry-run --Wer
 python3 -m ruff format .
 
 # Lint Python code
-python3 -m ruff format check --fix .
+python3 -m ruff check --fix .
 ```
 
 ## TLS Setup
