@@ -36,7 +36,10 @@ public:
         active_connections_++;
     }
     void decrement_connections() {
-        active_connections_--;
+        uint32_t current = active_connections_.load();
+        if (current > 0) {
+            active_connections_--;
+        }
     }
 
     [[nodiscard]] uint32_t failure_count() const {

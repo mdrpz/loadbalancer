@@ -80,15 +80,16 @@ bool Connection::write_to_fd() {
     return true;
 }
 void Connection::close() {
-    if (fd_ >= 0) {
-        if (ssl_) {
-            int shutdown_result = SSL_shutdown(ssl_);
-            (void)shutdown_result;
-        }
-        ::close(fd_);
+    if (ssl_) {
+        int shutdown_result = SSL_shutdown(ssl_);
+        (void)shutdown_result;
+        SSL_free(ssl_);
+        ssl_ = nullptr;
     }
-    fd_ = -1;
-    ssl_ = nullptr;
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
     state_ = ConnectionState::CLOSED;
     if (peer_)
         peer_->peer_ = nullptr;

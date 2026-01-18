@@ -16,7 +16,7 @@ namespace lb::health {
 
 HealthChecker::HealthChecker()
     : running_(false), interval_ms_(5000), timeout_ms_(500), failure_threshold_(3),
-      success_threshold_(2) {}
+      success_threshold_(2), health_check_type_("tcp") {}
 
 HealthChecker::~HealthChecker() {
     stop();
@@ -38,6 +38,16 @@ void HealthChecker::remove_backend(const std::shared_ptr<lb::core::BackendNode>&
     std::lock_guard<std::mutex> state_lock(state_mutex_);
     consecutive_failures_.erase(backend);
     consecutive_successes_.erase(backend);
+}
+
+void HealthChecker::configure(uint32_t interval_ms, uint32_t timeout_ms, uint32_t failure_threshold,
+                              uint32_t success_threshold, const std::string& type) {
+    std::lock_guard<std::mutex> lock(config_mutex_);
+    interval_ms_.store(interval_ms);
+    timeout_ms_.store(timeout_ms);
+    failure_threshold_.store(failure_threshold);
+    success_threshold_.store(success_threshold);
+    health_check_type_ = type;
 }
 
 void HealthChecker::start() {
@@ -65,7 +75,7 @@ void HealthChecker::run_loop() {
                 break;
             check_backend(backend);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms_));
+        std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms_.load()));
     }
 }
 
@@ -108,8 +118,9 @@ bool HealthChecker::check_backend(const std::shared_ptr<lb::core::BackendNode>& 
         FD_SET(sock, &write_fds);
 
         timeval timeout{};
-        timeout.tv_sec = timeout_ms_ / 1000;
-        timeout.tv_usec = (timeout_ms_ % 1000) * 1000;
+        uint32_t current_timeout = timeout_ms_.load();
+        timeout.tv_sec = current_timeout / 1000;
+        timeout.tv_usec = (current_timeout % 1000) * 1000;
 
         int select_result = select(sock + 1, nullptr, &write_fds, nullptr, &timeout);
 
@@ -137,7 +148,7 @@ void HealthChecker::update_backend_state(const std::shared_ptr<lb::core::Backend
         consecutive_successes_[backend]++;
 
         if (current_state == lb::core::BackendState::UNHEALTHY) {
-            if (consecutive_successes_[backend] >= success_threshold_) {
+            if (consecutive_successes_[backend] >= success_threshold_.load()) {
                 backend->set_state(lb::core::BackendState::HEALTHY);
                 consecutive_successes_[backend] = 0;
                 lb::logging::Logger::instance().info("Backend " + backend->host() + ":" +
@@ -150,7 +161,7 @@ void HealthChecker::update_backend_state(const std::shared_ptr<lb::core::Backend
         consecutive_failures_[backend]++;
 
         if (current_state == lb::core::BackendState::HEALTHY) {
-            if (consecutive_failures_[backend] >= failure_threshold_) {
+            if (consecutive_failures_[backend] >= failure_threshold_.load()) {
                 backend->set_state(lb::core::BackendState::UNHEALTHY);
                 consecutive_failures_[backend] = 0;
                 lb::logging::Logger::instance().warn("Backend " + backend->host() + ":" +

@@ -67,20 +67,23 @@ void ConnectionManager::close_connection(int fd) {
         return;
     }
 
-    conn->set_state(net::ConnectionState::CLOSED);
-
     auto backend_it = backend_connections_.find(fd);
+    bool was_established = (conn->state() == net::ConnectionState::ESTABLISHED);
     bool is_client_connection = (backend_it == backend_connections_.end());
 
     std::string backend_info;
     if (backend_it != backend_connections_.end()) {
         if (auto backend_node = backend_it->second.lock()) {
-            backend_node->decrement_connections();
+            if (was_established) {
+                backend_node->decrement_connections();
+            }
             backend_info =
                 " backend=" + backend_node->host() + ":" + std::to_string(backend_node->port());
         }
         backend_connections_.erase(backend_it);
     }
+
+    conn->set_state(net::ConnectionState::CLOSED);
 
     lb::metrics::Metrics::instance().add_bytes_in(conn->bytes_read());
     lb::metrics::Metrics::instance().add_bytes_out(conn->bytes_written());
@@ -151,13 +154,17 @@ void ConnectionManager::close_connection(int fd) {
         auto peer_it = connections_.find(peer_fd);
         if (peer_it != connections_.end()) {
             if (peer_it->second && peer_it->second->state() != net::ConnectionState::CLOSED) {
+                bool peer_was_established =
+                    (peer_it->second->state() == net::ConnectionState::ESTABLISHED);
                 peer_it->second->set_peer(nullptr);
                 auto peer_backend_it = backend_connections_.find(peer_fd);
                 bool is_peer_backend = (peer_backend_it != backend_connections_.end());
 
                 if (peer_backend_it != backend_connections_.end()) {
                     if (auto backend_node = peer_backend_it->second.lock()) {
-                        backend_node->decrement_connections();
+                        if (peer_was_established) {
+                            backend_node->decrement_connections();
+                        }
                     }
                     backend_connections_.erase(peer_backend_it);
                 }
@@ -199,13 +206,16 @@ void ConnectionManager::close_backend_connection_only(int backend_fd) {
 
     auto* conn = it->second.get();
     if (conn) {
+        bool was_established = (conn->state() == net::ConnectionState::ESTABLISHED);
         if (conn->peer())
             conn->peer()->set_peer(nullptr);
         conn->set_state(net::ConnectionState::CLOSED);
         auto backend_it = backend_connections_.find(backend_fd);
         if (backend_it != backend_connections_.end()) {
             if (auto backend_node = backend_it->second.lock()) {
-                backend_node->decrement_connections();
+                if (was_established) {
+                    backend_node->decrement_connections();
+                }
             }
             backend_connections_.erase(backend_it);
         }

@@ -202,6 +202,14 @@ void LoadBalancer::stop() {
 bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config::Config>& config) {
     if (!config)
         return false;
+
+    if (health_checker_) {
+        health_checker_->configure(
+            config->health_check_interval_ms, config->health_check_timeout_ms,
+            config->health_check_failure_threshold, config->health_check_success_threshold,
+            config->health_check_type);
+    }
+
     if (!initialize(config->listen_host, config->listen_port))
         return false;
     max_global_connections_ = config->max_global_connections;
@@ -475,9 +483,20 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
             config->health_check_success_threshold !=
                 previous_config->health_check_success_threshold ||
             config->health_check_type != previous_config->health_check_type) {
-            lb::logging::Logger::instance().warn(
-                "Health check settings changes require a restart to take effect. Current health "
-                "check configuration remains active.");
+            if (health_checker_) {
+                health_checker_->configure(
+                    config->health_check_interval_ms, config->health_check_timeout_ms,
+                    config->health_check_failure_threshold, config->health_check_success_threshold,
+                    config->health_check_type);
+                lb::logging::Logger::instance().info(
+                    "Health check configuration updated: interval=" +
+                    std::to_string(config->health_check_interval_ms) + "ms, timeout=" +
+                    std::to_string(config->health_check_timeout_ms) + "ms, failure_threshold=" +
+                    std::to_string(config->health_check_failure_threshold) +
+                    ", success_threshold=" +
+                    std::to_string(config->health_check_success_threshold) +
+                    ", type=" + config->health_check_type);
+            }
         }
 
         if (config->log_level != previous_config->log_level ||

@@ -18,6 +18,9 @@ public:
     void add_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
     void remove_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
 
+    void configure(uint32_t interval_ms, uint32_t timeout_ms, uint32_t failure_threshold,
+                   uint32_t success_threshold, const std::string& type);
+
     void start();
     void stop();
 
@@ -30,10 +33,12 @@ private:
     std::mutex backends_mutex_;
     std::thread thread_;
     std::atomic<bool> running_;
-    uint32_t interval_ms_;
-    uint32_t timeout_ms_;
-    uint32_t failure_threshold_;
-    uint32_t success_threshold_;
+    std::atomic<uint32_t> interval_ms_;
+    std::atomic<uint32_t> timeout_ms_;
+    std::atomic<uint32_t> failure_threshold_;
+    std::atomic<uint32_t> success_threshold_;
+    std::string health_check_type_;
+    std::mutex config_mutex_;
 
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_failures_;
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_successes_;
