@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -13,6 +14,9 @@ enum class ConnectionState { HANDSHAKE, CONNECTING, ESTABLISHED, CLOSED };
 
 class Connection {
 public:
+    using ReserveBytesFn = std::function<bool(size_t)>;
+    using ReleaseBytesFn = std::function<void(size_t)>;
+
     Connection(int fd);
     ~Connection();
 
@@ -49,8 +53,46 @@ public:
     }
 
     void clear_buffers() {
+        if (release_bytes_) {
+            release_bytes_(read_buf_.size() + write_buf_.size());
+        }
         read_buf_.clear();
         write_buf_.clear();
+        memory_blocked_ = false;
+    }
+
+    void set_memory_accounting(ReserveBytesFn reserve_bytes, ReleaseBytesFn release_bytes) {
+        reserve_bytes_ = std::move(reserve_bytes);
+        release_bytes_ = std::move(release_bytes);
+    }
+
+    [[nodiscard]] bool memory_blocked() const {
+        return memory_blocked_;
+    }
+
+    bool try_reserve_additional_bytes(size_t n) {
+        if (n == 0) {
+            memory_blocked_ = false;
+            return true;
+        }
+        if (!reserve_bytes_) {
+            memory_blocked_ = false;
+            return true;
+        }
+        if (!reserve_bytes_(n)) {
+            memory_blocked_ = true;
+            return false;
+        }
+        memory_blocked_ = false;
+        return true;
+    }
+
+    void release_accounted_bytes(size_t n) {
+        if (n == 0)
+            return;
+        if (release_bytes_)
+            release_bytes_(n);
+        memory_blocked_ = false;
     }
 
     void close();
@@ -84,6 +126,10 @@ private:
 
     size_t bytes_read_{0};
     size_t bytes_written_{0};
+
+    ReserveBytesFn reserve_bytes_;
+    ReleaseBytesFn release_bytes_;
+    bool memory_blocked_{false};
 };
 
 } // namespace lb::net

@@ -55,6 +55,9 @@ logging:
 timeouts:
   request_ms: 5000
 
+memory:
+  global_buffer_budget_mb: 512
+
 ip_filter:
   whitelist: []
   blacklist: []

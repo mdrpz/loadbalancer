@@ -52,6 +52,10 @@ void Metrics::increment_queue_drops() {
     queue_drops_++;
 }
 
+void Metrics::increment_memory_budget_drops() {
+    memory_budget_drops_++;
+}
+
 void Metrics::add_bytes_in(uint64_t bytes) {
     bytes_in_ += bytes;
 }
@@ -114,6 +118,10 @@ uint64_t Metrics::get_queue_drops() const {
     return queue_drops_.load();
 }
 
+uint64_t Metrics::get_memory_budget_drops() const {
+    return memory_budget_drops_.load();
+}
+
 uint64_t Metrics::get_bytes_in() const {
     return bytes_in_.load();
 }
@@ -153,6 +161,10 @@ std::string Metrics::export_prometheus() const {
     oss << "# HELP lb_queue_drops_total Connections dropped due to queue limits/timeouts\n";
     oss << "# TYPE lb_queue_drops_total counter\n";
     oss << "lb_queue_drops_total " << get_queue_drops() << "\n\n";
+
+    oss << "# HELP lb_memory_budget_drops_total Connections dropped due to memory budget\n";
+    oss << "# TYPE lb_memory_budget_drops_total counter\n";
+    oss << "lb_memory_budget_drops_total " << get_memory_budget_drops() << "\n\n";
 
     oss << "# HELP lb_bytes_received_total Total bytes received from clients\n";
     oss << "# TYPE lb_bytes_received_total counter\n";

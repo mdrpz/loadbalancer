@@ -32,6 +32,12 @@ bool Connection::read_from_fd() {
 
     size_t to_read = MAX_BUFFER_SIZE - read_buf_.size();
     size_t old_size = read_buf_.size();
+
+    if (reserve_bytes_ && !reserve_bytes_(to_read)) {
+        memory_blocked_ = true;
+        return true;
+    }
+
     read_buf_.resize(read_buf_.size() + to_read);
 
     ssize_t n;
@@ -39,6 +45,8 @@ bool Connection::read_from_fd() {
         n = SSL_read(ssl_, read_buf_.data() + old_size, static_cast<int>(to_read));
         if (n <= 0) {
             read_buf_.resize(old_size);
+            if (release_bytes_)
+                release_bytes_(to_read);
             int ssl_error = SSL_get_error(ssl_, static_cast<int>(n));
             return ssl_error == SSL_ERROR_WANT_READ || ssl_error == SSL_ERROR_WANT_WRITE;
         }
@@ -46,15 +54,22 @@ bool Connection::read_from_fd() {
         n = ::read(fd_, read_buf_.data() + old_size, to_read);
         if (n < 0) {
             read_buf_.resize(old_size);
+            if (release_bytes_)
+                release_bytes_(to_read);
             return errno == EAGAIN || errno == EWOULDBLOCK;
         }
         if (n == 0) {
             read_buf_.resize(old_size);
+            if (release_bytes_)
+                release_bytes_(to_read);
             return false;
         }
     }
     read_buf_.resize(old_size + n);
     bytes_read_ += n;
+    if (release_bytes_ && static_cast<size_t>(n) < to_read)
+        release_bytes_(to_read - static_cast<size_t>(n));
+    memory_blocked_ = false;
     return true;
 }
 
@@ -77,9 +92,21 @@ bool Connection::write_to_fd() {
     }
     write_buf_.erase(write_buf_.begin(), write_buf_.begin() + n);
     bytes_written_ += n;
+    if (release_bytes_)
+        release_bytes_(static_cast<size_t>(n));
+    memory_blocked_ = false;
     return true;
 }
 void Connection::close() {
+    if (release_bytes_) {
+        release_bytes_(read_buf_.size() + write_buf_.size());
+    }
+    read_buf_.clear();
+    write_buf_.clear();
+    reserve_bytes_ = nullptr;
+    release_bytes_ = nullptr;
+    memory_blocked_ = false;
+
     if (ssl_) {
         int shutdown_result = SSL_shutdown(ssl_);
         (void)shutdown_result;

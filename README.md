@@ -140,6 +140,9 @@ logging:
 
 timeouts:
   request_ms: 30000 
+
+memory:
+  global_buffer_budget_mb: 512
 ```
 
 ## Features
@@ -435,6 +438,10 @@ routing:
 ## Metrics
 
 Prometheus metrics are served at http://localhost:9090/metrics
+
+```bash
+curl http://localhost:9090/metrics
+```
 
 The following metrics are available:
 

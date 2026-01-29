@@ -16,6 +16,7 @@
 #include "core/data_forwarder.h"
 #include "core/event_handlers.h"
 #include "core/http_data_forwarder.h"
+#include "core/memory_budget.h"
 #include "core/retry_handler.h"
 #include "core/session_manager.h"
 #include "core/splice_forwarder.h"
@@ -62,6 +63,7 @@ private:
     void try_dequeue_clients();
     std::string get_session_key(int client_fd, const std::string& client_ip,
                                 const std::shared_ptr<const lb::config::Config>& config) const;
+    void attach_memory_accounting(net::Connection* conn);
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -120,6 +122,8 @@ private:
 
     std::unique_ptr<SessionManager> session_manager_;
     std::unordered_map<int, std::string> client_session_keys_;
+
+    std::shared_ptr<MemoryBudget> memory_budget_;
 };
 
 } // namespace lb::core

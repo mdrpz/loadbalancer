@@ -53,6 +53,16 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
             lb::http::HttpResponse error_resp =
                 lb::http::HttpResponse::bad_request("Invalid HTTP request");
             auto error_bytes = error_resp.to_bytes();
+            size_t old_sz = to->write_buffer().size();
+            size_t new_sz = error_bytes.size();
+            if (new_sz > old_sz) {
+                if (!to->try_reserve_additional_bytes(new_sz - old_sz)) {
+                    close_connection_(to->fd());
+                    return;
+                }
+            } else if (old_sz > new_sz) {
+                to->release_accounted_bytes(old_sz - new_sz);
+            }
             to->write_buffer().assign(error_bytes.begin(), error_bytes.end());
             reactor_.mod_fd(to->fd(), EPOLLIN | EPOLLOUT);
             read_buf.clear();
@@ -179,6 +189,17 @@ bool HttpDataForwarder::parse_and_modify_http_request(net::Connection* conn, int
 
         auto modified_request = serialize_http_request(request);
 
+        size_t before = read_buf.size();
+        size_t after = modified_request.size();
+        if (after > before) {
+            if (!conn->try_reserve_additional_bytes(after - before)) {
+                start_backpressure_(fd);
+                reactor_.mod_fd(fd, EPOLLOUT);
+                return false;
+            }
+        } else if (before > after) {
+            conn->release_accounted_bytes(before - after);
+        }
         read_buf = std::move(modified_request);
 
         return true;
@@ -329,6 +350,17 @@ bool HttpDataForwarder::parse_and_modify_http_response(net::Connection* conn, in
 
         auto modified_response = serialize_http_response(response);
 
+        size_t before = read_buf.size();
+        size_t after = modified_response.size();
+        if (after > before) {
+            if (!conn->try_reserve_additional_bytes(after - before)) {
+                start_backpressure_(conn->fd());
+                reactor_.mod_fd(conn->fd(), EPOLLOUT);
+                return false;
+            }
+        } else if (before > after) {
+            conn->release_accounted_bytes(before - after);
+        }
         read_buf = std::move(modified_response);
 
         return true;

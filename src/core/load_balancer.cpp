@@ -17,6 +17,7 @@
 #include "config/config.h"
 #include "core/backend_node.h"
 #include "core/http_data_forwarder.h"
+#include "core/memory_budget.h"
 #include "core/splice_forwarder.h"
 #include "health/health_checker.h"
 #include "http/http_handler.h"
@@ -64,6 +65,7 @@ LoadBalancer::LoadBalancer()
             backpressure_manager_->check_timeout(
                 fd, [this](int f) { connection_manager_->close_connection(f); });
         },
+        [this](int fd) { backpressure_manager_->start_tracking(fd); },
         [this](int fd) {
             auto* conn = connection_manager_->get_connection(fd);
             if (conn && conn->is_tls() && tls_context_) {
@@ -111,6 +113,12 @@ LoadBalancer::LoadBalancer()
         });
 
     session_manager_ = std::make_unique<SessionManager>();
+
+    memory_budget_ = std::make_shared<MemoryBudget>();
+    memory_budget_->set_limit_mb(512);
+
+    backend_connector_->set_connection_init_callback(
+        [this](net::Connection* c) { attach_memory_accounting(c); });
 }
 
 LoadBalancer::~LoadBalancer() {
@@ -390,6 +398,10 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
         add_backend(backend_cfg.host, backend_cfg.port, backend_cfg.weight);
     }
 
+    if (memory_budget_) {
+        memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
+    }
+
     pool_enabled_ = config->connection_pool_enabled;
     if (pool_enabled_) {
         PoolConfig pool_config;
@@ -522,9 +534,9 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
         }
 
         if (config->global_buffer_budget_mb != previous_config->global_buffer_budget_mb) {
-            lb::logging::Logger::instance().warn(
-                "Global buffer budget changes require a restart to take effect. Current setting "
-                "remains active.");
+            lb::logging::Logger::instance().info("Global buffer budget updated to " +
+                                                 std::to_string(config->global_buffer_budget_mb) +
+                                                 "MB");
         }
     }
 
@@ -532,6 +544,9 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
     request_timeout_ms_ = config->request_timeout_ms;
+    if (memory_budget_) {
+        memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
+    }
 
     if (backend_pool_) {
         RoutingAlgorithm new_algorithm = RoutingAlgorithm::ROUND_ROBIN;
@@ -847,11 +862,13 @@ void LoadBalancer::try_dequeue_clients() {
     }
 
     while (!pending_clients_.empty() &&
-           connection_manager_->count_established_connections() < max_global_connections_) {
+           connection_manager_->count_established_connections() < max_global_connections_ &&
+           !(memory_budget_ && memory_budget_->is_exceeded())) {
         QueuedClient qc = pending_clients_.front();
         pending_clients_.pop_front();
 
         auto client_conn = std::make_unique<net::Connection>(qc.fd);
+        attach_memory_accounting(client_conn.get());
 
         lb::metrics::Metrics::instance().increment_connections_total();
         lb::logging::Logger::instance().info("Dequeued connection from IP " + qc.client_ip);
@@ -935,6 +952,32 @@ void LoadBalancer::handle_accept() {
             continue;
         }
 
+        if (memory_budget_ && memory_budget_->is_exceeded()) {
+            if (config && config->queue_enabled &&
+                pending_clients_.size() < config->queue_max_size) {
+                auto now = std::chrono::steady_clock::now();
+                pending_clients_.push_back({client_fd, client_ip, now});
+                lb::logging::Logger::instance().info("Queued connection from IP " + client_ip +
+                                                     " due to memory budget");
+                continue;
+            }
+
+            lb::metrics::Metrics::instance().increment_memory_budget_drops();
+            lb::logging::Logger::instance().warn(
+                "Connection rejected: memory budget exceeded (used=" +
+                std::to_string(memory_budget_->used_bytes()) +
+                " bytes, limit=" + std::to_string(memory_budget_->limit_bytes()) + " bytes)");
+
+            if (config && config->mode == "http") {
+                lb::http::HttpResponse error_resp =
+                    lb::http::HttpResponse::service_unavailable("Service temporarily unavailable");
+                send_http_error_and_close(client_fd, error_resp);
+            } else {
+                ::close(client_fd);
+            }
+            continue;
+        }
+
         size_t established_count = connection_manager_->count_established_connections();
         if (established_count >= max_global_connections_) {
             if (config && config->queue_enabled &&
@@ -964,6 +1007,7 @@ void LoadBalancer::handle_accept() {
         lb::logging::Logger::instance().debug(
             "New connection accepted (fd=" + std::to_string(client_fd) + ")");
         auto client_conn = std::make_unique<net::Connection>(client_fd);
+        attach_memory_accounting(client_conn.get());
 
         if (tls_context_ && tls_context_->is_initialized()) {
             SSL* ssl = tls_context_->create_ssl(client_fd);
@@ -998,6 +1042,16 @@ void LoadBalancer::handle_accept() {
             backend_connector_->connect(std::move(client_conn), 0, session_key);
         }
     }
+}
+
+void LoadBalancer::attach_memory_accounting(net::Connection* conn) {
+    if (!conn || !memory_budget_)
+        return;
+    conn->set_memory_accounting(
+        [budget = memory_budget_](size_t n) {
+            return budget->try_reserve(static_cast<uint64_t>(n));
+        },
+        [budget = memory_budget_](size_t n) { budget->release(static_cast<uint64_t>(n)); });
 }
 
 std::string LoadBalancer::get_session_key(

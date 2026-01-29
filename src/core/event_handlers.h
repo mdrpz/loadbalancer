@@ -21,6 +21,7 @@ public:
                   uint32_t connection_timeout_seconds,
                   std::function<net::Connection*(int)> get_connection,
                   std::function<void(int)> check_backpressure,
+                  std::function<void(int)> start_backpressure,
                   std::function<void(int)> close_connection,
                   std::function<void(int)> close_backend_only,
                   std::function<void(net::Connection*, net::Connection*)> forward_data,
@@ -47,6 +48,7 @@ private:
 
     std::function<net::Connection*(int)> get_connection_;
     std::function<void(int)> check_backpressure_;
+    std::function<void(int)> start_backpressure_;
     std::function<void(int)> close_connection_;
     std::function<void(int)> close_backend_only_;
     std::function<void(net::Connection*, net::Connection*)> forward_data_;

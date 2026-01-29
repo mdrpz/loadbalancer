@@ -31,6 +31,7 @@ public:
     void set_pool_manager(ConnectionPoolManager* pool_manager);
     void set_session_manager(SessionManager* session_manager);
     void set_sticky_config(bool enabled, const std::string& method, uint32_t ttl_seconds);
+    void set_connection_init_callback(std::function<void(net::Connection*)> callback);
 
     using BackendSelectedCallback =
         std::function<void(int client_fd, const std::string& host, uint16_t port)>;
@@ -61,6 +62,7 @@ private:
     ConnectionPoolManager* pool_manager_ = nullptr;
     std::unordered_map<int, BackendInfo> pooled_connections_;
     BackendSelectedCallback backend_selected_callback_;
+    std::function<void(net::Connection*)> connection_init_callback_;
     SessionManager* session_manager_ = nullptr;
     bool sticky_sessions_enabled_ = false;
     std::string sticky_sessions_method_;

@@ -19,8 +19,8 @@ EventHandlers::EventHandlers(
     std::unordered_map<int, int>& backend_to_client_map,
     std::unordered_map<int, int>& client_retry_counts, net::EpollReactor& reactor,
     uint32_t connection_timeout_seconds, std::function<net::Connection*(int)> get_connection,
-    std::function<void(int)> check_backpressure, std::function<void(int)> close_connection,
-    std::function<void(int)> close_backend_only,
+    std::function<void(int)> check_backpressure, std::function<void(int)> start_backpressure,
+    std::function<void(int)> close_connection, std::function<void(int)> close_backend_only,
     std::function<void(net::Connection*, net::Connection*)> forward_data,
     std::function<void(int)> clear_backpressure,
     std::function<void(std::unique_ptr<net::Connection>, int)> retry,
@@ -31,6 +31,7 @@ EventHandlers::EventHandlers(
       connection_timeout_seconds_(connection_timeout_seconds),
       get_connection_(std::move(std::move(get_connection))),
       check_backpressure_(std::move(std::move(check_backpressure))),
+      start_backpressure_(std::move(std::move(start_backpressure))),
       close_connection_(std::move(std::move(close_connection))),
       close_backend_only_(std::move(std::move(close_backend_only))),
       forward_data_(std::move(std::move(forward_data))),
@@ -95,6 +96,11 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
         }
 
         bool read_success = conn->read_from_fd();
+        if (conn->memory_blocked()) {
+            start_backpressure_(fd);
+            reactor_.mod_fd(fd, EPOLLOUT);
+            return;
+        }
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
             if (!conn->read_buffer().empty()) {
                 forward_data_(conn, conn->peer());
@@ -121,6 +127,8 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
 
         if (!conn->write_to_fd())
             close_connection_(fd);
+        if (!conn->memory_blocked())
+            reactor_.mod_fd(fd, EPOLLIN | EPOLLOUT);
 
         if (conn->write_buffer().empty())
             clear_backpressure_(fd);
@@ -237,6 +245,11 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
         }
 
         bool read_success = conn->read_from_fd();
+        if (conn->memory_blocked()) {
+            start_backpressure_(fd);
+            reactor_.mod_fd(fd, EPOLLOUT);
+            return;
+        }
 
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED &&
             !conn->read_buffer().empty())

@@ -57,6 +57,11 @@ void BackendConnector::set_sticky_config(bool enabled, const std::string& method
     sticky_sessions_ttl_seconds_ = ttl_seconds;
 }
 
+void BackendConnector::set_connection_init_callback(
+    std::function<void(net::Connection*)> callback) {
+    connection_init_callback_ = std::move(callback);
+}
+
 BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd) const {
     auto it = pooled_connections_.find(backend_fd);
     if (it != pooled_connections_.end()) {
@@ -67,6 +72,10 @@ BackendConnector::BackendInfo BackendConnector::get_backend_info(int backend_fd)
 
 void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int retry_count,
                                const std::string& session_key) {
+    if (client_conn && connection_init_callback_) {
+        connection_init_callback_(client_conn.get());
+    }
+
     std::shared_ptr<BackendNode> backend_node;
     std::string sticky_host;
     uint16_t sticky_port = 0;
@@ -109,6 +118,9 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     if (pool_manager_) {
         auto pooled_backend = pool_manager_->borrow(host, port);
         if (pooled_backend) {
+            if (connection_init_callback_) {
+                connection_init_callback_(pooled_backend.get());
+            }
             lb::logging::Logger::instance().debug("Using pooled connection to " + backend_key);
 
             int backend_fd = pooled_backend->fd();
@@ -172,6 +184,9 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     freeaddrinfo(res);
 
     auto backend_conn = std::make_unique<net::Connection>(backend_fd);
+    if (connection_init_callback_) {
+        connection_init_callback_(backend_conn.get());
+    }
 
     if (result < 0 && errno != EINPROGRESS) {
         backend_node->increment_failures();
