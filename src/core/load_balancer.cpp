@@ -32,7 +32,7 @@ namespace lb::core {
 LoadBalancer::LoadBalancer()
     : max_global_connections_(1000), max_connections_per_backend_(100),
       backpressure_timeout_ms_(10000), connection_timeout_seconds_(5), request_timeout_ms_(0),
-      config_manager_(nullptr), mode_("tcp") {
+      config_manager_(nullptr), mode_("tcp"), graceful_shutdown_timeout_seconds_(30) {
     reactor_ = std::make_unique<net::EpollReactor>();
     backend_pool_ = std::make_unique<BackendPool>();
     health_checker_ = std::make_unique<lb::health::HealthChecker>();
@@ -175,6 +175,10 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
     if (reactor_ && config_manager_) {
         reactor_->set_periodic_callback(
             [this]() {
+                if (draining_.load()) {
+                    check_graceful_shutdown();
+                    return;
+                }
                 if (config_manager_ && config_manager_->check_and_reload()) {
                     auto new_config = config_manager_->get_config();
                     if (new_config)
@@ -207,6 +211,109 @@ void LoadBalancer::stop() {
         reactor_->stop();
 }
 
+void LoadBalancer::shutdown_gracefully() {
+    if (shutdown_requested_.exchange(true)) {
+        return;
+    }
+
+    lb::logging::Logger::instance().info("Graceful shutdown initiated (timeout: " +
+                                         std::to_string(graceful_shutdown_timeout_seconds_) +
+                                         " seconds)");
+
+    if (listener_) {
+        int listener_fd = listener_->fd();
+        if (listener_fd >= 0 && reactor_) {
+            reactor_->del_fd(listener_fd);
+        }
+        listener_.reset();
+        lb::logging::Logger::instance().info("Listener closed, no longer accepting connections");
+    }
+
+    auto all_backends = backend_pool_->get_all_backends();
+    for (auto& backend : all_backends) {
+        if (backend->state() != BackendState::DRAINING) {
+            backend->set_state(BackendState::DRAINING);
+            lb::logging::Logger::instance().info("Backend " + backend->host() + ":" +
+                                                 std::to_string(backend->port()) +
+                                                 " marked as DRAINING");
+        }
+    }
+
+    draining_ = true;
+    shutdown_deadline_ =
+        std::chrono::steady_clock::now() + std::chrono::seconds(graceful_shutdown_timeout_seconds_);
+
+    size_t active_count = connection_manager_->count_established_connections();
+    if (active_count == 0) {
+        lb::logging::Logger::instance().info("No active connections, shutting down immediately");
+        force_close_all_connections();
+        if (health_checker_)
+            health_checker_->stop();
+        if (reactor_)
+            reactor_->stop();
+        draining_ = false;
+    } else {
+        lb::logging::Logger::instance().info("Draining " + std::to_string(active_count) +
+                                             " active connections");
+    }
+}
+
+void LoadBalancer::check_graceful_shutdown() {
+    if (!draining_.load())
+        return;
+
+    auto now = std::chrono::steady_clock::now();
+    size_t active_count = connection_manager_->count_established_connections();
+
+    if (active_count == 0) {
+        lb::logging::Logger::instance().info("All connections drained, shutting down");
+        force_close_all_connections();
+        if (health_checker_)
+            health_checker_->stop();
+        if (reactor_)
+            reactor_->stop();
+        draining_ = false;
+        return;
+    }
+
+    if (now >= shutdown_deadline_) {
+        lb::logging::Logger::instance().warn("Graceful shutdown timeout exceeded, force-closing " +
+                                             std::to_string(active_count) +
+                                             " remaining connections");
+        force_close_all_connections();
+        if (health_checker_)
+            health_checker_->stop();
+        if (reactor_)
+            reactor_->stop();
+        draining_ = false;
+        return;
+    }
+
+    auto remaining =
+        std::chrono::duration_cast<std::chrono::seconds>(shutdown_deadline_ - now).count();
+    if (remaining % 5 == 0 || remaining < 5) {
+        lb::logging::Logger::instance().info("Draining: " + std::to_string(active_count) +
+                                             " connections remaining, " +
+                                             std::to_string(remaining) + " seconds left");
+    }
+}
+
+void LoadBalancer::force_close_all_connections() {
+    std::vector<int> fds_to_close;
+    for (const auto& [fd, conn] : connections_) {
+        if (conn && conn->state() != net::ConnectionState::CLOSED) {
+            fds_to_close.push_back(fd);
+        }
+    }
+
+    for (int fd : fds_to_close) {
+        connection_manager_->close_connection(fd);
+    }
+
+    lb::logging::Logger::instance().info("Force-closed " + std::to_string(fds_to_close.size()) +
+                                         " connections");
+}
+
 bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config::Config>& config) {
     if (!config)
         return false;
@@ -232,6 +339,7 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
 
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
     request_timeout_ms_ = config->request_timeout_ms;
+    graceful_shutdown_timeout_seconds_ = config->graceful_shutdown_timeout_seconds;
     mode_ = config->mode.empty() ? "tcp" : config->mode;
 
     backpressure_manager_ =
@@ -544,6 +652,7 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
     max_connections_per_backend_ = config->max_connections_per_backend;
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
     request_timeout_ms_ = config->request_timeout_ms;
+    graceful_shutdown_timeout_seconds_ = config->graceful_shutdown_timeout_seconds;
     if (memory_budget_) {
         memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
     }

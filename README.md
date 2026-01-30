@@ -143,6 +143,9 @@ timeouts:
 
 memory:
   global_buffer_budget_mb: 512
+
+graceful_shutdown:
+  timeout_seconds: 30
 ```
 
 ## Features
@@ -160,6 +163,7 @@ memory:
 - **HTTP Error Responses** - Proper HTTP error responses when rejecting connections
 - **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests and responses
 - **Connection Rate Limiting** - Limit connections per IP address to prevent abuse
+- **Graceful Shutdown** - Drains active connections before shutdown (configurable timeout)
 
 ## Architecture
 
@@ -434,6 +438,30 @@ routing:
 - **Automatic Cleanup**: Expired sessions are automatically removed
 - **Fallback**: If sticky backend is unhealthy or at capacity, falls back to normal routing algorithm
 - **Hot Reload**: Sticky session settings update on config reload without restart
+
+## Graceful Shutdown
+
+The load balancer supports graceful shutdown, allowing active connections to complete before shutting down. This prevents dropped requests during deployments or restarts.
+
+Configure in `config.yaml`:
+
+```yaml
+graceful_shutdown:
+  timeout_seconds: 30  # Default: 30 seconds
+```
+
+**Behavior:**
+- **SIGTERM/SIGINT**: Initiates graceful shutdown sequence
+- **Stop Accepting**: Listener is closed immediately (no new connections)
+- **Drain Connections**: Existing connections are allowed to complete
+- **Backend Draining**: All backends are marked as DRAINING (no new requests routed)
+- **Timeout**: If connections don't drain within `timeout_seconds`, remaining connections are force-closed
+- **Logging**: Progress is logged every 5 seconds during drain phase
+
+**Use Cases:**
+- Zero-downtime deployments
+- Rolling restarts
+- Configuration reloads that require a restart
 
 ## Metrics
 

@@ -17,7 +17,7 @@ void signal_handler(int sig) {
     (void)sig;
     g_shutdown.store(true);
     if (g_lb)
-        g_lb->stop();
+        g_lb->shutdown_gracefully();
 }
 } // namespace
 

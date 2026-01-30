@@ -42,6 +42,7 @@ public:
     bool initialize_from_config(const std::shared_ptr<const lb::config::Config>& config);
     void run();
     void stop();
+    void shutdown_gracefully();
 
     void set_config_manager(lb::config::ConfigManager* config_manager);
 
@@ -64,6 +65,8 @@ private:
     std::string get_session_key(int client_fd, const std::string& client_ip,
                                 const std::shared_ptr<const lb::config::Config>& config) const;
     void attach_memory_accounting(net::Connection* conn);
+    void check_graceful_shutdown();
+    void force_close_all_connections();
 
     std::unique_ptr<net::EpollReactor> reactor_;
     std::unique_ptr<net::TcpListener> listener_;
@@ -124,6 +127,11 @@ private:
     std::unordered_map<int, std::string> client_session_keys_;
 
     std::shared_ptr<MemoryBudget> memory_budget_;
+
+    std::atomic<bool> shutdown_requested_{false};
+    std::atomic<bool> draining_{false};
+    std::chrono::steady_clock::time_point shutdown_deadline_;
+    uint32_t graceful_shutdown_timeout_seconds_{30};
 };
 
 } // namespace lb::core
