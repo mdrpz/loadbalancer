@@ -1,4 +1,5 @@
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <iostream>
 #include <memory>
@@ -15,9 +16,7 @@ lb::core::LoadBalancer* g_lb = nullptr;
 
 void signal_handler(int sig) {
     (void)sig;
-    g_shutdown.store(true);
-    if (g_lb)
-        g_lb->shutdown_gracefully();
+    g_shutdown.store(true, std::memory_order_relaxed);
 }
 } // namespace
 
@@ -153,6 +152,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    std::atomic<bool> stop_shutdown_watcher{false};
+    std::thread shutdown_watcher([&]() {
+        while (!stop_shutdown_watcher.load(std::memory_order_relaxed)) {
+            if (g_shutdown.load(std::memory_order_relaxed)) {
+                if (g_lb)
+                    g_lb->shutdown_gracefully();
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    });
+
     uint16_t metrics_port = config ? config->metrics_port : 9090;
     bool metrics_enabled = config ? config->metrics_enabled : true;
     std::unique_ptr<lb::metrics::MetricsServer> metrics_server;
@@ -167,6 +178,10 @@ int main(int argc, char* argv[]) {
     std::cout << "Press Ctrl+C to stop...\n";
 
     lb.run();
+
+    stop_shutdown_watcher.store(true, std::memory_order_relaxed);
+    if (shutdown_watcher.joinable())
+        shutdown_watcher.join();
 
     std::cout << "Load Balancer shutting down...\n";
     logger.info("Load balancer shutting down");
