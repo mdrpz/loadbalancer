@@ -37,7 +37,8 @@ health_check:
   timeout_ms: 500
   failure_threshold: 3
   success_threshold: 2
-  type: "tcp"
+  type: "tcp"  # "tcp" or "http"
+  path: "/health"  # HTTP health check path (only used when type: "http")
 
 backpressure:
   timeout_ms: 10000

@@ -33,6 +33,7 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->health_check_failure_threshold = 3;
     config_->health_check_success_threshold = 2;
     config_->health_check_type = "tcp";
+    config_->health_check_path = "/health";
     config_->thread_pool_worker_count = 4;
     config_->metrics_enabled = true;
     config_->metrics_port = 9090;
@@ -201,6 +202,8 @@ bool ConfigManager::load_from_file(const std::string& path) {
                     health["success_threshold"].as<uint32_t>();
             if (health["type"])
                 new_config->health_check_type = health["type"].as<std::string>();
+            if (health["path"])
+                new_config->health_check_path = health["path"].as<std::string>();
         }
 
         if (config["thread_pool"]) {

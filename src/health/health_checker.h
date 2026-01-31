@@ -19,7 +19,8 @@ public:
     void remove_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
 
     void configure(uint32_t interval_ms, uint32_t timeout_ms, uint32_t failure_threshold,
-                   uint32_t success_threshold, const std::string& type);
+                   uint32_t success_threshold, const std::string& type,
+                   const std::string& path = "/health");
 
     void start();
     void stop();
@@ -27,6 +28,8 @@ public:
 private:
     void run_loop();
     bool check_backend(const std::shared_ptr<lb::core::BackendNode>& backend);
+    bool check_http_health(int sock, const std::shared_ptr<lb::core::BackendNode>& backend,
+                           const std::string& path, uint32_t timeout_ms);
     void update_backend_state(const std::shared_ptr<lb::core::BackendNode>& backend, bool healthy);
 
     std::vector<std::shared_ptr<lb::core::BackendNode>> backends_;
@@ -38,6 +41,7 @@ private:
     std::atomic<uint32_t> failure_threshold_;
     std::atomic<uint32_t> success_threshold_;
     std::string health_check_type_;
+    std::string health_check_path_;
     std::mutex config_mutex_;
 
     std::unordered_map<std::shared_ptr<lb::core::BackendNode>, uint32_t> consecutive_failures_;

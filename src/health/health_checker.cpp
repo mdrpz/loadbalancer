@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <algorithm>
 #include <chrono>
+#include <sstream>
+#include <string>
 #include <thread>
 #include "logging/logger.h"
 
@@ -41,13 +43,15 @@ void HealthChecker::remove_backend(const std::shared_ptr<lb::core::BackendNode>&
 }
 
 void HealthChecker::configure(uint32_t interval_ms, uint32_t timeout_ms, uint32_t failure_threshold,
-                              uint32_t success_threshold, const std::string& type) {
+                              uint32_t success_threshold, const std::string& type,
+                              const std::string& path) {
     std::lock_guard<std::mutex> lock(config_mutex_);
     interval_ms_.store(interval_ms);
     timeout_ms_.store(timeout_ms);
     failure_threshold_.store(failure_threshold);
     success_threshold_.store(success_threshold);
     health_check_type_ = type;
+    health_check_path_ = path;
 }
 
 void HealthChecker::start() {
@@ -80,6 +84,16 @@ void HealthChecker::run_loop() {
 }
 
 bool HealthChecker::check_backend(const std::shared_ptr<lb::core::BackendNode>& backend) {
+    std::string check_type;
+    std::string check_path;
+    uint32_t current_timeout;
+    {
+        std::lock_guard<std::mutex> lock(config_mutex_);
+        check_type = health_check_type_;
+        check_path = health_check_path_;
+        current_timeout = timeout_ms_.load();
+    }
+
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         update_backend_state(backend, false);
@@ -132,9 +146,95 @@ bool HealthChecker::check_backend(const std::shared_ptr<lb::core::BackendNode>& 
         }
     }
 
+    if (!connected) {
+        ::close(sock);
+        update_backend_state(backend, false);
+        return false;
+    }
+
+    if (check_type != "http") {
+        ::close(sock);
+        update_backend_state(backend, true);
+        return true;
+    }
+
+    bool http_healthy = check_http_health(sock, backend, check_path, current_timeout);
     ::close(sock);
-    update_backend_state(backend, connected);
-    return connected;
+    update_backend_state(backend, http_healthy);
+    return http_healthy;
+}
+
+bool HealthChecker::check_http_health(int sock,
+                                      const std::shared_ptr<lb::core::BackendNode>& backend,
+                                      const std::string& path, uint32_t timeout_ms) {
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0 || fcntl(sock, F_SETFL, flags & ~O_NONBLOCK) < 0) {
+        return false;
+    }
+
+    std::ostringstream request;
+    request << "GET " << path << " HTTP/1.1\r\n";
+    request << "Host: " << backend->host() << ":" << backend->port() << "\r\n";
+    request << "Connection: close\r\n";
+    request << "\r\n";
+
+    std::string request_str = request.str();
+    ssize_t sent = send(sock, request_str.c_str(), request_str.size(), 0);
+    if (sent != static_cast<ssize_t>(request_str.size())) {
+        return false;
+    }
+
+    timeval timeout{};
+    timeout.tv_sec = timeout_ms / 1000;
+    timeout.tv_usec = (timeout_ms % 1000) * 1000;
+    if (setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        return false;
+    }
+
+    char buffer[4096];
+    ssize_t received = recv(sock, buffer, sizeof(buffer) - 1, 0);
+    if (received <= 0) {
+        return false;
+    }
+
+    buffer[received] = '\0';
+    std::string response(buffer, received);
+
+    size_t http_pos = response.find("HTTP/");
+    if (http_pos == std::string::npos) {
+        return false;
+    }
+
+    size_t space1 = response.find(' ', http_pos);
+    if (space1 == std::string::npos) {
+        return false;
+    }
+
+    size_t space2 = response.find(' ', space1 + 1);
+    if (space2 == std::string::npos) {
+        space2 = response.find('\r', space1 + 1);
+        if (space2 == std::string::npos) {
+            space2 = response.find('\n', space1 + 1);
+        }
+        if (space2 == std::string::npos) {
+            return false;
+        }
+    }
+
+    std::string status_str = response.substr(space1 + 1, space2 - space1 - 1);
+    if (status_str.length() != 3) {
+        return false;
+    }
+
+    int status_code = 0;
+    for (char c : status_str) {
+        if (c < '0' || c > '9') {
+            return false;
+        }
+        status_code = status_code * 10 + (c - '0');
+    }
+
+    return status_code >= 200 && status_code < 300;
 }
 
 void HealthChecker::update_backend_state(const std::shared_ptr<lb::core::BackendNode>& backend,

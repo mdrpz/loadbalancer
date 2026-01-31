@@ -130,6 +130,12 @@ backends:
 routing:
   algorithm: "round_robin"  # or "least_connections"
 
+health_check:
+  interval_ms: 5000          # Check interval
+  timeout_ms: 500            # Check timeout
+  type: "tcp"                # "tcp" or "http"
+  path: "/health"            # HTTP health check path (only used when type: "http")
+
 connection_pool:
   enabled: true             # Reuse backend connections
   max_connections: 10       # Per backend
@@ -152,7 +158,7 @@ graceful_shutdown:
 
 - **HTTP Mode** - Adds `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto` headers
 - **TLS Termination** - Backends receive plain TCP
-- **Health Checks** - Auto-removes unhealthy backends
+- **Health Checks** - TCP and HTTP health checks with configurable paths
 - **Hot Reload** - Config changes apply without restart
 - **Connection Pooling** - Reuses backend connections (-36% p95 latency)
 - **Routing** - Round-robin, least-connections, weighted
@@ -438,6 +444,41 @@ routing:
 - **Automatic Cleanup**: Expired sessions are automatically removed
 - **Fallback**: If sticky backend is unhealthy or at capacity, falls back to normal routing algorithm
 - **Hot Reload**: Sticky session settings update on config reload without restart
+
+## Health Checks
+
+The load balancer supports both TCP and HTTP health checks to monitor backend availability.
+
+Configure in `config.yaml`:
+
+```yaml
+health_check:
+  interval_ms: 5000          # How often to check (default: 5000ms)
+  timeout_ms: 500            # Check timeout (default: 500ms)
+  failure_threshold: 3       # Consecutive failures before marking unhealthy (default: 3)
+  success_threshold: 2       # Consecutive successes before marking healthy (default: 2)
+  type: "tcp"                # "tcp" or "http"
+  path: "/health"            # HTTP health check path (default: "/health", only used when type: "http")
+```
+
+**TCP Health Checks:**
+- Simple connection test
+- Checks if backend accepts TCP connections
+- Faster and lighter weight
+- Suitable for any TCP service
+
+**HTTP Health Checks:**
+- Sends `GET <path> HTTP/1.1` request
+- Validates response status code (2xx = healthy)
+- More accurate for HTTP services
+- Can check application-level health
+
+**Behavior:**
+- **Interval**: Health checks run every `interval_ms` milliseconds
+- **Timeout**: Each check must complete within `timeout_ms` milliseconds
+- **Thresholds**: Backends transition states only after meeting threshold requirements (prevents flapping)
+- **Unhealthy Backends**: Automatically removed from routing pool
+- **Recovery**: Unhealthy backends are re-checked and restored when healthy
 
 ## Graceful Shutdown
 

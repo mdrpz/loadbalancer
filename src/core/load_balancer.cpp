@@ -322,7 +322,7 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
         health_checker_->configure(
             config->health_check_interval_ms, config->health_check_timeout_ms,
             config->health_check_failure_threshold, config->health_check_success_threshold,
-            config->health_check_type);
+            config->health_check_type, config->health_check_path);
     }
 
     if (!initialize(config->listen_host, config->listen_port))
@@ -607,7 +607,7 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
                 health_checker_->configure(
                     config->health_check_interval_ms, config->health_check_timeout_ms,
                     config->health_check_failure_threshold, config->health_check_success_threshold,
-                    config->health_check_type);
+                    config->health_check_type, config->health_check_path);
                 lb::logging::Logger::instance().info(
                     "Health check configuration updated: interval=" +
                     std::to_string(config->health_check_interval_ms) + "ms, timeout=" +
@@ -615,7 +615,9 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
                     std::to_string(config->health_check_failure_threshold) +
                     ", success_threshold=" +
                     std::to_string(config->health_check_success_threshold) +
-                    ", type=" + config->health_check_type);
+                    ", type=" + config->health_check_type +
+                    (config->health_check_type == "http" ? ", path=" + config->health_check_path
+                                                         : ""));
             }
         }
 

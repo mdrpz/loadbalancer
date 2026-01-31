@@ -42,6 +42,7 @@ struct Config {
     uint32_t health_check_failure_threshold;
     uint32_t health_check_success_threshold;
     std::string health_check_type; // "tcp" or "http"
+    std::string health_check_path; // HTTP health check path (default: "/health")
 
     uint32_t thread_pool_worker_count;
 
