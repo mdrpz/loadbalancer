@@ -79,6 +79,7 @@ private:
     std::unordered_map<int, std::weak_ptr<BackendNode>> backend_connections_;
 
     std::unordered_map<int, std::chrono::steady_clock::time_point> connection_times_;
+    std::unordered_map<int, std::chrono::steady_clock::time_point> handshake_start_times_;
 
     std::unordered_map<int, int> backend_to_client_map_;
 
@@ -132,6 +133,9 @@ private:
     std::atomic<bool> draining_{false};
     std::chrono::steady_clock::time_point shutdown_deadline_;
     uint32_t graceful_shutdown_timeout_seconds_{30};
+    uint32_t tls_handshake_timeout_ms_{10000};
+
+    void check_handshake_timeouts();
 };
 
 } // namespace lb::core

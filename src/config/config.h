@@ -21,6 +21,7 @@ struct Config {
     bool tls_enabled;
     std::string tls_cert_path;
     std::string tls_key_path;
+    uint32_t tls_handshake_timeout_ms;
 
     std::string mode; // "tcp" or "http"
     bool use_splice;  // Use zero-copy splice() for TCP mode (Linux only)

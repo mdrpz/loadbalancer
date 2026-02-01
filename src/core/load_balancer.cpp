@@ -78,6 +78,7 @@ LoadBalancer::LoadBalancer()
             if (splice_forwarder_) {
                 splice_forwarder_->cleanup(fd);
             }
+            handshake_start_times_.erase(fd);
             connection_manager_->close_connection(fd);
         },
         [this](int fd) { connection_manager_->close_backend_connection_only(fd); },
@@ -95,6 +96,7 @@ LoadBalancer::LoadBalancer()
             retry_handler_->retry(std::move(conn), retry_count);
         },
         [this](int fd) {
+            handshake_start_times_.erase(fd);
             auto it = connections_.find(fd);
             if (it != connections_.end() && it->second) {
                 auto client_conn = std::move(it->second);
@@ -189,6 +191,7 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                     pool_manager_->evict_expired();
                 }
                 check_request_timeouts();
+                check_handshake_timeouts();
                 cleanup_rate_limit_entries();
                 try_dequeue_clients();
                 if (session_manager_) {
@@ -340,6 +343,7 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
     request_timeout_ms_ = config->request_timeout_ms;
     graceful_shutdown_timeout_seconds_ = config->graceful_shutdown_timeout_seconds;
+    tls_handshake_timeout_ms_ = config->tls_handshake_timeout_ms;
     mode_ = config->mode.empty() ? "tcp" : config->mode;
 
     backpressure_manager_ =
@@ -655,6 +659,7 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
     backpressure_timeout_ms_ = config->backpressure_timeout_ms;
     request_timeout_ms_ = config->request_timeout_ms;
     graceful_shutdown_timeout_seconds_ = config->graceful_shutdown_timeout_seconds;
+    tls_handshake_timeout_ms_ = config->tls_handshake_timeout_ms;
     if (memory_budget_) {
         memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
     }
@@ -815,6 +820,33 @@ void LoadBalancer::check_request_timeouts() {
         lb::logging::Logger::instance().warn("Request timeout for connection fd=" +
                                              std::to_string(fd));
         connection_manager_->close_connection(fd);
+    }
+}
+
+void LoadBalancer::check_handshake_timeouts() {
+    if (tls_handshake_timeout_ms_ == 0)
+        return;
+
+    auto now = std::chrono::steady_clock::now();
+    std::vector<int> timed_out_fds;
+
+    for (const auto& [fd, start_time] : handshake_start_times_) {
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+
+        if (elapsed >= static_cast<int64_t>(tls_handshake_timeout_ms_)) {
+            auto it = connections_.find(fd);
+            if (it != connections_.end() && it->second &&
+                it->second->state() == net::ConnectionState::HANDSHAKE) {
+                timed_out_fds.push_back(fd);
+            }
+        }
+    }
+
+    for (int fd : timed_out_fds) {
+        lb::logging::Logger::instance().warn("TLS handshake timeout for fd=" + std::to_string(fd));
+        connection_manager_->close_connection(fd);
+        handshake_start_times_.erase(fd);
     }
 }
 
@@ -1003,6 +1035,7 @@ void LoadBalancer::try_dequeue_clients() {
             int client_fd_stored = client_conn->fd();
             connections_[client_fd_stored] = std::move(client_conn);
             connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
+            handshake_start_times_[client_fd_stored] = std::chrono::steady_clock::now();
 
             reactor_->add_fd(client_fd_stored, EPOLLIN | EPOLLOUT,
                              [this](int fd, net::EventType type) {
@@ -1138,6 +1171,7 @@ void LoadBalancer::handle_accept() {
             int client_fd_stored = client_conn->fd();
             connections_[client_fd_stored] = std::move(client_conn);
             connection_times_[client_fd_stored] = std::chrono::steady_clock::now();
+            handshake_start_times_[client_fd_stored] = std::chrono::steady_clock::now();
 
             reactor_->add_fd(client_fd_stored, EPOLLIN | EPOLLOUT,
                              [this](int fd, net::EventType type) {

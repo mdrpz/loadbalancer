@@ -43,6 +43,7 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->global_buffer_budget_mb = 512;
     config_->backpressure_timeout_ms = 10000;
     config_->graceful_shutdown_timeout_seconds = 30;
+    config_->tls_handshake_timeout_ms = 10000;
     config_->ip_whitelist.clear();
     config_->ip_blacklist.clear();
     config_->http_request_headers_add.clear();
@@ -133,6 +134,12 @@ bool ConfigManager::load_from_file(const std::string& path) {
                 new_config->mode = listener["mode"].as<std::string>();
             if (listener["use_splice"])
                 new_config->use_splice = listener["use_splice"].as<bool>();
+        }
+
+        if (config["tls"]) {
+            const auto& tls = config["tls"];
+            if (tls["handshake_timeout_ms"])
+                new_config->tls_handshake_timeout_ms = tls["handshake_timeout_ms"].as<uint32_t>();
         }
 
         if (config["backends"] && config["backends"].IsSequence()) {

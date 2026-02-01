@@ -7,6 +7,9 @@ listener:
   tls_cert: "certs/server.crt"
   tls_key: "certs/server.key"
 
+tls:
+  handshake_timeout_ms: 10000  # Timeout for TLS handshakes (10 seconds)
+
 backends:
   - host: "127.0.0.1"
     port: 8000

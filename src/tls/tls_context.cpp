@@ -54,6 +54,10 @@ bool TlsContext::initialize() {
 
     SSL_CTX_set_options(ctx_, SSL_OP_CIPHER_SERVER_PREFERENCE);
 
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
+    SSL_CTX_set_options(ctx_, SSL_OP_NO_RENEGOTIATION);
+#endif
+
     return true;
 }
 
