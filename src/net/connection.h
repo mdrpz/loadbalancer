@@ -42,6 +42,7 @@ public:
 
     [[nodiscard]] size_t read_available() const;
     [[nodiscard]] size_t write_available() const;
+    [[nodiscard]] bool has_read_space() const;
     bool read_from_fd();
     bool write_to_fd();
 
@@ -59,6 +60,7 @@ public:
         read_buf_.clear();
         write_buf_.clear();
         memory_blocked_ = false;
+        buffer_full_ = false;
     }
 
     void set_memory_accounting(ReserveBytesFn reserve_bytes, ReleaseBytesFn release_bytes) {
@@ -68,6 +70,13 @@ public:
 
     [[nodiscard]] bool memory_blocked() const {
         return memory_blocked_;
+    }
+
+    [[nodiscard]] bool buffer_full() const {
+        return buffer_full_;
+    }
+    void set_buffer_full(bool full) {
+        buffer_full_ = full;
     }
 
     bool try_reserve_additional_bytes(size_t n) {
@@ -130,6 +139,7 @@ private:
     ReserveBytesFn reserve_bytes_;
     ReleaseBytesFn release_bytes_;
     bool memory_blocked_{false};
+    bool buffer_full_{false};
 };
 
 } // namespace lb::net

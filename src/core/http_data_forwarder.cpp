@@ -99,6 +99,7 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
     clear_backpressure_(from_fd);
 
     size_t to_copy = std::min(read_buf.size(), available);
+    bool was_buffer_full = from->buffer_full();
     to->write_buffer().insert(to->write_buffer().end(), read_buf.begin(),
                               read_buf.begin() + to_copy);
 
@@ -119,8 +120,17 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
 
     read_buf.erase(read_buf.begin(), read_buf.begin() + to_copy);
 
+    if (was_buffer_full && from->has_read_space()) {
+        from->set_buffer_full(false);
+    }
+
     reactor_.mod_fd(to->fd(), EPOLLIN | EPOLLOUT);
-    reactor_.mod_fd(from_fd, EPOLLIN | EPOLLOUT);
+
+    uint32_t from_events = EPOLLOUT;
+    if (!from->memory_blocked() && !from->buffer_full()) {
+        from_events |= EPOLLIN;
+    }
+    reactor_.mod_fd(from_fd, from_events);
 
     if (!to->write_to_fd()) {
         close_connection_(to->fd());

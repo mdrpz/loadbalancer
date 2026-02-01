@@ -101,6 +101,17 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
             reactor_.mod_fd(fd, EPOLLOUT);
             return;
         }
+
+        if (conn->buffer_full()) {
+            reactor_.mod_fd(fd, EPOLLOUT);
+            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                if (!conn->read_buffer().empty()) {
+                    forward_data_(conn, conn->peer());
+                }
+            }
+            return;
+        }
+
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
             if (!conn->read_buffer().empty()) {
                 forward_data_(conn, conn->peer());
@@ -251,6 +262,14 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             return;
         }
 
+        if (conn->buffer_full()) {
+            reactor_.mod_fd(fd, EPOLLOUT);
+            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED &&
+                !conn->read_buffer().empty())
+                forward_data_(conn, conn->peer());
+            return;
+        }
+
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED &&
             !conn->read_buffer().empty())
             forward_data_(conn, conn->peer());
@@ -272,8 +291,13 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
 
         if (conn->write_buffer().empty())
             clear_backpressure_(fd);
-        if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED)
-            reactor_.mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
+        if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+            uint32_t peer_events = EPOLLOUT;
+            if (!conn->peer()->memory_blocked() && !conn->peer()->buffer_full()) {
+                peer_events |= EPOLLIN;
+            }
+            reactor_.mod_fd(conn->peer()->fd(), peer_events);
+        }
         if (conn->peer())
             clear_backpressure_(conn->peer()->fd());
     }

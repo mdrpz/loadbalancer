@@ -26,9 +26,17 @@ size_t Connection::write_available() const {
     return MAX_BUFFER_SIZE - write_buf_.size();
 }
 
+bool Connection::has_read_space() const {
+    return read_buf_.size() < MAX_BUFFER_SIZE;
+}
+
 bool Connection::read_from_fd() {
-    if (read_buf_.size() >= MAX_BUFFER_SIZE)
-        return false;
+    if (read_buf_.size() >= MAX_BUFFER_SIZE) {
+        buffer_full_ = true;
+        return true;
+    }
+
+    buffer_full_ = false;
 
     size_t to_read = MAX_BUFFER_SIZE - read_buf_.size();
     size_t old_size = read_buf_.size();
@@ -70,6 +78,11 @@ bool Connection::read_from_fd() {
     if (release_bytes_ && static_cast<size_t>(n) < to_read)
         release_bytes_(to_read - static_cast<size_t>(n));
     memory_blocked_ = false;
+    if (read_buf_.size() >= MAX_BUFFER_SIZE) {
+        buffer_full_ = true;
+    } else {
+        buffer_full_ = false;
+    }
     return true;
 }
 
@@ -106,6 +119,7 @@ void Connection::close() {
     reserve_bytes_ = nullptr;
     release_bytes_ = nullptr;
     memory_blocked_ = false;
+    buffer_full_ = false;
 
     if (ssl_) {
         int shutdown_result = SSL_shutdown(ssl_);
