@@ -20,6 +20,7 @@
 #include "core/retry_handler.h"
 #include "core/session_manager.h"
 #include "core/splice_forwarder.h"
+#include "core/thread_pool.h"
 #include "health/health_checker.h"
 #include "net/connection.h"
 #include "net/epoll_reactor.h"
@@ -136,6 +137,8 @@ private:
     uint32_t tls_handshake_timeout_ms_{10000};
 
     void check_handshake_timeouts();
+
+    std::unique_ptr<ThreadPool> thread_pool_;
 };
 
 } // namespace lb::core

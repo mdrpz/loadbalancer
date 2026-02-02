@@ -330,6 +330,15 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
 
     if (!initialize(config->listen_host, config->listen_port))
         return false;
+
+    if (config->thread_pool_worker_count > 0) {
+        thread_pool_ = std::make_unique<ThreadPool>(config->thread_pool_worker_count);
+        lb::logging::Logger::instance().info("Thread pool initialized with " +
+                                             std::to_string(config->thread_pool_worker_count) +
+                                             " workers");
+    } else {
+        thread_pool_.reset();
+    }
     max_global_connections_ = config->max_global_connections;
     max_connections_per_backend_ = config->max_connections_per_backend;
     if (backend_connector_) {

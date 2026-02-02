@@ -30,6 +30,7 @@ add_library(lb_lib STATIC
     src/net/tcp_listener.cpp
     src/net/epoll_reactor.cpp
     src/net/connection.cpp
+    src/core/thread_pool.cpp
     src/core/backend_pool.cpp
     src/core/backend_node.cpp
     src/core/load_balancer.cpp
