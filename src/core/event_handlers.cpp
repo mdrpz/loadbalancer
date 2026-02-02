@@ -175,6 +175,21 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             if (try_retry_on_backend_error(fd)) {
                 return;
             }
+
+            close_connection_(fd);
+            return;
+        }
+
+        if (conn->state() == net::ConnectionState::ESTABLISHED) {
+            conn->read_from_fd();
+            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                if (!conn->read_buffer().empty()) {
+                    forward_data_(conn, conn->peer());
+                }
+                ::shutdown(conn->peer()->fd(), SHUT_WR);
+            }
+
+            close_backend_only_(fd);
         }
 
         close_connection_(fd);
@@ -275,7 +290,16 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             forward_data_(conn, conn->peer());
 
         if (!read_success) {
-            close_connection_(fd);
+            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+                if (!conn->read_buffer().empty()) {
+                    forward_data_(conn, conn->peer());
+                }
+                ::shutdown(conn->peer()->fd(), SHUT_WR);
+            }
+
+            // Detach and close only the backend; keep the client connection alive so it
+            // can finish sending buffered data to the caller.
+            close_backend_only_(fd);
             return;
         }
     }
