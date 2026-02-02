@@ -46,6 +46,16 @@ size_t ConnectionManager::count_established_connections() const {
     return count;
 }
 
+size_t ConnectionManager::count_active_client_connections() const {
+    size_t count = 0;
+    for (const auto& [fd, conn] : connections_) {
+        if (backend_connections_.find(fd) == backend_connections_.end() && conn &&
+            conn->state() != net::ConnectionState::CLOSED)
+            count++;
+    }
+    return count;
+}
+
 void ConnectionManager::close_connection(int fd) {
     auto it = connections_.find(fd);
     if (it == connections_.end())

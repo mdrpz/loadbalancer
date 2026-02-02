@@ -9,6 +9,8 @@
 #include "http/http_handler.h"
 #include "http/http_request.h"
 #include "http/http_response.h"
+#include "logging/logger.h"
+#include "metrics/metrics.h"
 
 namespace lb::core {
 
@@ -50,24 +52,57 @@ void HttpDataForwarder::forward(net::Connection* from, net::Connection* to) {
         }
 
         if (state.request_parsed_ && state.parser.has_error()) {
+            lb::metrics::Metrics::instance().increment_bad_requests();
+
+            std::string client_ip = get_client_ip_(from_fd);
+            if (client_ip.empty())
+                client_ip = "unknown";
+
+            std::string error_msg = state.parser.error_message();
+            if (error_msg.empty())
+                error_msg = "Invalid HTTP request";
+
+            lb::logging::Logger::instance().warn("Invalid HTTP request from " + client_ip +
+                                                 " (fd=" + std::to_string(from_fd) +
+                                                 "): " + error_msg);
+
+            if (access_log_callback_) {
+                RequestInfo bad_req;
+                bad_req.client_ip = client_ip;
+                bad_req.method = "INVALID";
+                bad_req.path = "";
+                bad_req.status_code = 400;
+                bad_req.start_time = std::chrono::system_clock::now();
+                bad_req.response_complete_time = bad_req.start_time;
+                bad_req.response_complete = true;
+                bad_req.bytes_received = read_buf.size();
+                access_log_callback_(from_fd, bad_req);
+            }
+
             lb::http::HttpResponse error_resp =
                 lb::http::HttpResponse::bad_request("Invalid HTTP request");
             auto error_bytes = error_resp.to_bytes();
-            size_t old_sz = to->write_buffer().size();
+            size_t old_sz = from->write_buffer().size();
             size_t new_sz = error_bytes.size();
             if (new_sz > old_sz) {
-                if (!to->try_reserve_additional_bytes(new_sz - old_sz)) {
-                    close_connection_(to->fd());
+                if (!from->try_reserve_additional_bytes(new_sz - old_sz)) {
+                    close_connection_(from_fd);
+                    if (to) {
+                        close_connection_(to->fd());
+                    }
                     return;
                 }
             } else if (old_sz > new_sz) {
-                to->release_accounted_bytes(old_sz - new_sz);
+                from->release_accounted_bytes(old_sz - new_sz);
             }
-            to->write_buffer().assign(error_bytes.begin(), error_bytes.end());
-            reactor_.mod_fd(to->fd(), EPOLLIN | EPOLLOUT);
+            from->write_buffer().assign(error_bytes.begin(), error_bytes.end());
+            reactor_.mod_fd(from_fd, EPOLLIN | EPOLLOUT);
             read_buf.clear();
             state.request_parsed_ = false;
             state.parser.reset();
+            if (to) {
+                close_connection_(to->fd());
+            }
             return;
         }
     } else {

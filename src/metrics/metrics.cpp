@@ -56,6 +56,10 @@ void Metrics::increment_memory_budget_drops() {
     memory_budget_drops_++;
 }
 
+void Metrics::increment_bad_requests() {
+    bad_requests_++;
+}
+
 void Metrics::add_bytes_in(uint64_t bytes) {
     bytes_in_ += bytes;
 }
@@ -122,6 +126,10 @@ uint64_t Metrics::get_memory_budget_drops() const {
     return memory_budget_drops_.load();
 }
 
+uint64_t Metrics::get_bad_requests() const {
+    return bad_requests_.load();
+}
+
 uint64_t Metrics::get_bytes_in() const {
     return bytes_in_.load();
 }
@@ -165,6 +173,10 @@ std::string Metrics::export_prometheus() const {
     oss << "# HELP lb_memory_budget_drops_total Connections dropped due to memory budget\n";
     oss << "# TYPE lb_memory_budget_drops_total counter\n";
     oss << "lb_memory_budget_drops_total " << get_memory_budget_drops() << "\n\n";
+
+    oss << "# HELP lb_bad_requests_total Invalid HTTP requests (400 Bad Request)\n";
+    oss << "# TYPE lb_bad_requests_total counter\n";
+    oss << "lb_bad_requests_total " << get_bad_requests() << "\n\n";
 
     oss << "# HELP lb_bytes_received_total Total bytes received from clients\n";
     oss << "# TYPE lb_bytes_received_total counter\n";

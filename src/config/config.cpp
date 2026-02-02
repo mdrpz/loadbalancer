@@ -336,8 +336,8 @@ bool ConfigManager::load_from_file(const std::string& path) {
             const auto& queue = config["queue"];
             if (queue["enabled"])
                 new_config->queue_enabled = queue["enabled"].as<bool>();
-            if (queue["max_size"])
-                new_config->queue_max_size = queue["max_size"].as<uint32_t>();
+            if (queue["max_queue_size"])
+                new_config->queue_max_size = queue["max_queue_size"].as<uint32_t>();
             if (queue["max_wait_ms"])
                 new_config->queue_max_wait_ms = queue["max_wait_ms"].as<uint32_t>();
         }

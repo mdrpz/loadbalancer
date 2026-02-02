@@ -246,7 +246,7 @@ void LoadBalancer::shutdown_gracefully() {
     shutdown_deadline_ =
         std::chrono::steady_clock::now() + std::chrono::seconds(graceful_shutdown_timeout_seconds_);
 
-    size_t active_count = connection_manager_->count_established_connections();
+    size_t active_count = connection_manager_->count_active_client_connections();
     if (active_count == 0) {
         lb::logging::Logger::instance().info("No active connections, shutting down immediately");
         force_close_all_connections();
@@ -266,7 +266,7 @@ void LoadBalancer::check_graceful_shutdown() {
         return;
 
     auto now = std::chrono::steady_clock::now();
-    size_t active_count = connection_manager_->count_established_connections();
+    size_t active_count = connection_manager_->count_active_client_connections();
 
     if (active_count == 0) {
         lb::logging::Logger::instance().info("All connections drained, shutting down");
@@ -907,22 +907,56 @@ bool LoadBalancer::is_ip_allowed(const std::string& client_ip,
 void LoadBalancer::send_http_error_and_close(int client_fd,
                                              const lb::http::HttpResponse& response) {
     auto response_bytes = response.to_bytes();
+
     ssize_t sent = 0;
     ssize_t total = response_bytes.size();
 
     while (sent < total) {
-        ssize_t bytes = send(client_fd, response_bytes.data() + sent, total - sent, 0);
+        ssize_t bytes = send(client_fd, response_bytes.data() + sent, total - sent, MSG_NOSIGNAL);
         if (bytes < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             }
-            break;
+            ::close(client_fd);
+            return;
         }
         sent += bytes;
     }
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    ::close(client_fd);
+    if (sent >= total) {
+        ::close(client_fd);
+        return;
+    }
+
+    auto error_conn = std::make_unique<net::Connection>(client_fd);
+    error_conn->set_state(net::ConnectionState::ESTABLISHED);
+
+    error_conn->write_buffer().assign(response_bytes.begin() + sent, response_bytes.end());
+
+    int stored_fd = error_conn->fd();
+    connections_[stored_fd] = std::move(error_conn);
+    connection_times_[stored_fd] = std::chrono::steady_clock::now();
+
+    reactor_->add_fd(stored_fd, EPOLLOUT, [this](int fd, net::EventType type) {
+        auto it = connections_.find(fd);
+        if (it == connections_.end() || !it->second)
+            return;
+
+        auto* conn = it->second.get();
+        if (type == net::EventType::WRITE) {
+            if (!conn->write_to_fd()) {
+                connection_manager_->close_connection(fd);
+                return;
+            }
+
+            if (conn->write_buffer().empty()) {
+                connection_manager_->close_connection(fd);
+                return;
+            }
+        } else if (type == net::EventType::ERROR || type == net::EventType::HUP) {
+            connection_manager_->close_connection(fd);
+        }
+    });
 }
 
 bool LoadBalancer::check_rate_limit(const std::string& client_ip,
@@ -1014,7 +1048,7 @@ void LoadBalancer::try_dequeue_clients() {
     }
 
     while (!pending_clients_.empty() &&
-           connection_manager_->count_established_connections() < max_global_connections_ &&
+           connection_manager_->count_active_client_connections() < max_global_connections_ &&
            !(memory_budget_ && memory_budget_->is_exceeded())) {
         QueuedClient qc = pending_clients_.front();
         pending_clients_.pop_front();
@@ -1131,8 +1165,8 @@ void LoadBalancer::handle_accept() {
             continue;
         }
 
-        size_t established_count = connection_manager_->count_established_connections();
-        if (established_count >= max_global_connections_) {
+        size_t active_count = connection_manager_->count_active_client_connections();
+        if (active_count >= max_global_connections_) {
             if (config && config->queue_enabled &&
                 pending_clients_.size() < config->queue_max_size) {
                 auto now = std::chrono::steady_clock::now();

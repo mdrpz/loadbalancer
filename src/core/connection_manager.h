@@ -23,6 +23,7 @@ public:
 
     net::Connection* get_connection(int fd);
     [[nodiscard]] size_t count_established_connections() const;
+    [[nodiscard]] size_t count_active_client_connections() const;
 
     void close_connection(int fd);
     void close_backend_connection_only(int backend_fd);
