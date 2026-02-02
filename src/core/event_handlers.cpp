@@ -120,14 +120,13 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
 
         if (!read_success) {
             if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
-                if (!conn->read_buffer().empty())
+                if (!conn->read_buffer().empty()) {
                     forward_data_(conn, conn->peer());
+                }
+                ::shutdown(conn->peer()->fd(), SHUT_WR);
             }
 
-            if (conn->fd() >= 0)
-                ::shutdown(conn->fd(), SHUT_WR);
-            if (conn->peer() && conn->peer()->fd() >= 0)
-                ::shutdown(conn->peer()->fd(), SHUT_WR);
+            close_connection_(fd);
             return;
         }
     }
@@ -182,14 +181,17 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
 
         if (conn->state() == net::ConnectionState::ESTABLISHED) {
             conn->read_from_fd();
-            if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
+            if (auto* peer = conn->peer();
+                peer && peer->state() == net::ConnectionState::ESTABLISHED) {
                 if (!conn->read_buffer().empty()) {
-                    forward_data_(conn, conn->peer());
+                    forward_data_(conn, peer);
                 }
-                ::shutdown(conn->peer()->fd(), SHUT_WR);
+                reactor_.mod_fd(peer->fd(), EPOLLIN | EPOLLOUT);
+                ::shutdown(peer->fd(), SHUT_WR);
             }
 
             close_backend_only_(fd);
+            return;
         }
 
         close_connection_(fd);
