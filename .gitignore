@@ -32,6 +32,9 @@ Thumbs.db
 # Markdown files
 plan.md
 
+# Text files
+*.txt
+
 # Temporary files
 *.tmp
 *.bak
