@@ -12,6 +12,12 @@
 
 namespace lb::core {
 
+namespace {
+inline bool has_pending_send(lb::net::Connection* conn) {
+    return conn && (!conn->write_buffer().empty() || conn->pending_kernel_bytes() > 0);
+}
+} // namespace
+
 EventHandlers::EventHandlers(
     std::unordered_map<int, std::unique_ptr<net::Connection>>& connections,
     std::unordered_map<int, std::weak_ptr<BackendNode>>& backend_connections,
@@ -124,9 +130,10 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
                     forward_data_(conn, conn->peer());
                 }
                 ::shutdown(conn->peer()->fd(), SHUT_WR);
+                reactor_.mod_fd(fd, EPOLLOUT);
+            } else {
+                close_connection_(fd);
             }
-
-            close_connection_(fd);
             return;
         }
     }
@@ -135,17 +142,20 @@ void EventHandlers::handle_client_event(int fd, net::EventType type) {
         if (conn->state() != net::ConnectionState::ESTABLISHED)
             return;
 
-        if (!conn->write_to_fd())
+        if (!conn->write_to_fd()) {
             close_connection_(fd);
+            return;
+        }
         if (!conn->memory_blocked())
             reactor_.mod_fd(fd, EPOLLIN | EPOLLOUT);
 
-        if (conn->write_buffer().empty())
-            clear_backpressure_(fd);
+        if (has_pending_send(conn))
+            start_backpressure_(fd);
+
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED)
             reactor_.mod_fd(conn->peer()->fd(), EPOLLIN | EPOLLOUT);
-        if (conn->peer())
-            clear_backpressure_(conn->peer()->fd());
+        if (conn->peer() && has_pending_send(conn->peer()))
+            start_backpressure_(conn->peer()->fd());
     }
 }
 
@@ -299,8 +309,6 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
                 ::shutdown(conn->peer()->fd(), SHUT_WR);
             }
 
-            // Detach and close only the backend; keep the client connection alive so it
-            // can finish sending buffered data to the caller.
             close_backend_only_(fd);
             return;
         }
@@ -315,17 +323,19 @@ void EventHandlers::handle_backend_event(int fd, net::EventType type) {
             return;
         }
 
-        if (conn->write_buffer().empty())
-            clear_backpressure_(fd);
+        if (has_pending_send(conn))
+            start_backpressure_(fd);
+
         if (conn->peer() && conn->peer()->state() == net::ConnectionState::ESTABLISHED) {
             uint32_t peer_events = EPOLLOUT;
             if (!conn->peer()->memory_blocked() && !conn->peer()->buffer_full()) {
                 peer_events |= EPOLLIN;
             }
             reactor_.mod_fd(conn->peer()->fd(), peer_events);
+
+            if (has_pending_send(conn->peer()))
+                start_backpressure_(conn->peer()->fd());
         }
-        if (conn->peer())
-            clear_backpressure_(conn->peer()->fd());
     }
 }
 

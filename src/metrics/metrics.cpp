@@ -60,6 +60,24 @@ void Metrics::increment_bad_requests() {
     bad_requests_++;
 }
 
+void Metrics::increment_backpressure_events() {
+    backpressure_events_++;
+}
+
+void Metrics::increment_backpressure_timeouts() {
+    backpressure_timeouts_++;
+}
+
+void Metrics::increment_backpressure_active() {
+    backpressure_active_++;
+}
+
+void Metrics::decrement_backpressure_active() {
+    uint64_t val = backpressure_active_.load();
+    if (val > 0)
+        backpressure_active_--;
+}
+
 void Metrics::add_bytes_in(uint64_t bytes) {
     bytes_in_ += bytes;
 }
@@ -130,6 +148,18 @@ uint64_t Metrics::get_bad_requests() const {
     return bad_requests_.load();
 }
 
+uint64_t Metrics::get_backpressure_events() const {
+    return backpressure_events_.load();
+}
+
+uint64_t Metrics::get_backpressure_timeouts() const {
+    return backpressure_timeouts_.load();
+}
+
+uint64_t Metrics::get_backpressure_active() const {
+    return backpressure_active_.load();
+}
+
 uint64_t Metrics::get_bytes_in() const {
     return bytes_in_.load();
 }
@@ -177,6 +207,18 @@ std::string Metrics::export_prometheus() const {
     oss << "# HELP lb_bad_requests_total Invalid HTTP requests (400 Bad Request)\n";
     oss << "# TYPE lb_bad_requests_total counter\n";
     oss << "lb_bad_requests_total " << get_bad_requests() << "\n\n";
+
+    oss << "# HELP lb_backpressure_events_total Total number of backpressure events triggered\n";
+    oss << "# TYPE lb_backpressure_events_total counter\n";
+    oss << "lb_backpressure_events_total " << get_backpressure_events() << "\n\n";
+
+    oss << "# HELP lb_backpressure_timeouts_total Connections closed due to backpressure timeout\n";
+    oss << "# TYPE lb_backpressure_timeouts_total counter\n";
+    oss << "lb_backpressure_timeouts_total " << get_backpressure_timeouts() << "\n\n";
+
+    oss << "# HELP lb_backpressure_active Current number of connections in backpressure\n";
+    oss << "# TYPE lb_backpressure_active gauge\n";
+    oss << "lb_backpressure_active " << get_backpressure_active() << "\n\n";
 
     oss << "# HELP lb_bytes_received_total Total bytes received from clients\n";
     oss << "# TYPE lb_bytes_received_total counter\n";

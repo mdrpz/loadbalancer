@@ -26,6 +26,10 @@ public:
     void increment_queue_drops();
     void increment_memory_budget_drops();
     void increment_bad_requests();
+    void increment_backpressure_events();
+    void increment_backpressure_timeouts();
+    void increment_backpressure_active();
+    void decrement_backpressure_active();
 
     void add_bytes_in(uint64_t bytes);
     void add_bytes_out(uint64_t bytes);
@@ -42,6 +46,9 @@ public:
     uint64_t get_queue_drops() const;
     uint64_t get_memory_budget_drops() const;
     uint64_t get_bad_requests() const;
+    uint64_t get_backpressure_events() const;
+    uint64_t get_backpressure_timeouts() const;
+    uint64_t get_backpressure_active() const;
     uint64_t get_bytes_in() const;
     uint64_t get_bytes_out() const;
 
@@ -60,6 +67,9 @@ private:
     std::atomic<uint64_t> queue_drops_{0};
     std::atomic<uint64_t> memory_budget_drops_{0};
     std::atomic<uint64_t> bad_requests_{0};
+    std::atomic<uint64_t> backpressure_events_{0};
+    std::atomic<uint64_t> backpressure_timeouts_{0};
+    std::atomic<uint64_t> backpressure_active_{0};
     std::atomic<uint64_t> bytes_in_{0};
     std::atomic<uint64_t> bytes_out_{0};
 

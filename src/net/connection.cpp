@@ -4,6 +4,10 @@
 #include <openssl/ssl.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#ifdef __linux__
+#include <linux/sockios.h>
+#include <sys/ioctl.h>
+#endif
 #include <algorithm>
 
 namespace lb::net {
@@ -109,6 +113,18 @@ bool Connection::write_to_fd() {
         release_bytes_(static_cast<size_t>(n));
     memory_blocked_ = false;
     return true;
+}
+
+size_t Connection::pending_kernel_bytes() const {
+#ifdef __linux__
+    if (fd_ < 0)
+        return 0;
+    int pending = 0;
+    if (ioctl(fd_, SIOCOUTQ, &pending) == 0 && pending > 0) {
+        return static_cast<size_t>(pending);
+    }
+#endif
+    return 0;
 }
 void Connection::close() {
     if (release_bytes_) {

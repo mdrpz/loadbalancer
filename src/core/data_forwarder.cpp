@@ -28,15 +28,13 @@ void DataForwarder::forward(net::Connection* from, net::Connection* to) {
         return;
 
     size_t available = to->write_available();
-    if (available == 0) {
+    size_t to_copy = std::min(read_buf.size(), available);
+    if (to_copy == 0) {
         start_backpressure_(from->fd());
         reactor_.mod_fd(from->fd(), EPOLLOUT);
         return;
     }
 
-    clear_backpressure_(from->fd());
-
-    size_t to_copy = std::min(read_buf.size(), available);
     bool was_buffer_full = from->buffer_full();
     write_buf.insert(write_buf.end(), read_buf.begin(), read_buf.begin() + to_copy);
     read_buf.erase(read_buf.begin(), read_buf.begin() + to_copy);
@@ -56,6 +54,16 @@ void DataForwarder::forward(net::Connection* from, net::Connection* to) {
     if (!to->write_to_fd()) {
         close_connection_(to->fd());
         return;
+    }
+
+    auto has_pending_send = [](net::Connection* conn) {
+        return conn && (!conn->write_buffer().empty() || conn->pending_kernel_bytes() > 0);
+    };
+
+    if (has_pending_send(to)) {
+        start_backpressure_(from->fd());
+    } else {
+        clear_backpressure_(from->fd());
     }
 }
 

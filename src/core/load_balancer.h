@@ -137,6 +137,7 @@ private:
     uint32_t tls_handshake_timeout_ms_{10000};
 
     void check_handshake_timeouts();
+    void check_backpressure_timeouts();
 
     std::unique_ptr<ThreadPool> thread_pool_;
 };

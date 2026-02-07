@@ -262,12 +262,10 @@ void test_health_flapping() {
     assert(backend->state() == lb::core::BackendState::UNHEALTHY);
 
     server.set_http_healthy(true);
-    // Require two consecutive successes to flip back to HEALTHY
     std::this_thread::sleep_for(std::chrono::milliseconds(400));
     assert(backend->state() == lb::core::BackendState::HEALTHY);
 
     server.set_http_healthy(false);
-    // Three consecutive failures should be needed to mark UNHEALTHY again
     std::this_thread::sleep_for(std::chrono::milliseconds(600));
     assert(backend->state() == lb::core::BackendState::UNHEALTHY);
 

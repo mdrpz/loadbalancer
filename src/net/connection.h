@@ -122,6 +122,7 @@ public:
     [[nodiscard]] size_t bytes_written() const {
         return bytes_written_;
     }
+    [[nodiscard]] size_t pending_kernel_bytes() const;
 
 private:
     int fd_;

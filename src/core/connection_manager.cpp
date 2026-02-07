@@ -70,6 +70,9 @@ void ConnectionManager::close_connection(int fd) {
     if (conn->state() == net::ConnectionState::CLOSED) {
         backend_connections_.erase(fd);
         connection_times_.erase(fd);
+        if (backpressure_times_.count(fd) > 0) {
+            lb::metrics::Metrics::instance().decrement_backpressure_active();
+        }
         backpressure_times_.erase(fd);
         client_retry_counts_.erase(fd);
         backend_to_client_map_.erase(fd);
@@ -144,6 +147,9 @@ void ConnectionManager::close_connection(int fd) {
 
     connection_times_.erase(fd);
 
+    if (backpressure_times_.count(fd) > 0) {
+        lb::metrics::Metrics::instance().decrement_backpressure_active();
+    }
     backpressure_times_.erase(fd);
 
     client_retry_counts_.erase(fd);
@@ -179,6 +185,9 @@ void ConnectionManager::close_connection(int fd) {
                     backend_connections_.erase(peer_backend_it);
                 }
                 connection_times_.erase(peer_fd);
+                if (backpressure_times_.count(peer_fd) > 0) {
+                    lb::metrics::Metrics::instance().decrement_backpressure_active();
+                }
                 backpressure_times_.erase(peer_fd);
                 client_retry_counts_.erase(peer_fd);
                 backend_to_client_map_.erase(peer_fd);
@@ -230,6 +239,9 @@ void ConnectionManager::close_backend_connection_only(int backend_fd) {
             backend_connections_.erase(backend_it);
         }
         connection_times_.erase(backend_fd);
+        if (backpressure_times_.count(backend_fd) > 0) {
+            lb::metrics::Metrics::instance().decrement_backpressure_active();
+        }
         backpressure_times_.erase(backend_fd);
         backend_to_client_map_.erase(backend_fd);
         reactor_.del_fd(backend_fd);

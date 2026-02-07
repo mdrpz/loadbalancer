@@ -253,23 +253,34 @@ void SpliceForwarder::forward_with_buffers(net::Connection* from, net::Connectio
     }
 
     size_t available = to->write_available();
-    if (available == 0) {
+    size_t to_copy = std::min(read_buf.size(), available);
+    if (to_copy == 0) {
         start_backpressure_(from->fd());
         reactor_.mod_fd(from->fd(), EPOLLOUT);
         return;
     }
 
-    clear_backpressure_(from->fd());
-
-    size_t to_copy = std::min(read_buf.size(), available);
     write_buf.insert(write_buf.end(), read_buf.begin(), read_buf.begin() + to_copy);
     read_buf.erase(read_buf.begin(), read_buf.begin() + to_copy);
+
+    if (!write_buf.empty()) {
+        start_backpressure_(from->fd());
+    } else {
+        clear_backpressure_(from->fd());
+    }
 
     reactor_.mod_fd(to->fd(), EPOLLIN | EPOLLOUT);
     reactor_.mod_fd(from->fd(), EPOLLIN | EPOLLOUT);
 
     if (!to->write_to_fd()) {
         close_connection_(to->fd());
+        return;
+    }
+
+    if (!to->write_buffer().empty()) {
+        start_backpressure_(from->fd());
+    } else {
+        clear_backpressure_(from->fd());
     }
 }
 

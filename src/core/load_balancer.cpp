@@ -45,8 +45,18 @@ LoadBalancer::LoadBalancer()
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
 
     data_forwarder_ = std::make_unique<DataForwarder>(
-        *reactor_, [this](int fd) { backpressure_manager_->start_tracking(fd); },
-        [this](int fd) { backpressure_manager_->clear_tracking(fd); },
+        *reactor_,
+        [this](int fd) {
+            if (backpressure_manager_->start_tracking(fd)) {
+                lb::metrics::Metrics::instance().increment_backpressure_events();
+                lb::metrics::Metrics::instance().increment_backpressure_active();
+            }
+        },
+        [this](int fd) {
+            if (backpressure_manager_->clear_tracking(fd)) {
+                lb::metrics::Metrics::instance().decrement_backpressure_active();
+            }
+        },
         [this](int fd) { connection_manager_->close_connection(fd); });
 
     retry_handler_ = std::make_unique<RetryHandler>(
@@ -62,10 +72,17 @@ LoadBalancer::LoadBalancer()
         client_retry_counts_, *reactor_, connection_timeout_seconds_,
         [this](int fd) { return connection_manager_->get_connection(fd); },
         [this](int fd) {
-            backpressure_manager_->check_timeout(
-                fd, [this](int f) { connection_manager_->close_connection(f); });
+            backpressure_manager_->check_timeout(fd, [this](int f) {
+                lb::metrics::Metrics::instance().increment_backpressure_timeouts();
+                connection_manager_->close_connection(f);
+            });
         },
-        [this](int fd) { backpressure_manager_->start_tracking(fd); },
+        [this](int fd) {
+            if (backpressure_manager_->start_tracking(fd)) {
+                lb::metrics::Metrics::instance().increment_backpressure_events();
+                lb::metrics::Metrics::instance().increment_backpressure_active();
+            }
+        },
         [this](int fd) {
             auto* conn = connection_manager_->get_connection(fd);
             if (conn && conn->is_tls() && tls_context_) {
@@ -91,7 +108,11 @@ LoadBalancer::LoadBalancer()
                 data_forwarder_->forward(from, to);
             }
         },
-        [this](int fd) { backpressure_manager_->clear_tracking(fd); },
+        [this](int fd) {
+            if (backpressure_manager_->clear_tracking(fd)) {
+                lb::metrics::Metrics::instance().decrement_backpressure_active();
+            }
+        },
         [this](std::unique_ptr<net::Connection> conn, int retry_count) {
             retry_handler_->retry(std::move(conn), retry_count);
         },
@@ -174,7 +195,7 @@ bool LoadBalancer::initialize(const std::string& listen_host, uint16_t listen_po
 void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager) {
     config_manager_ = config_manager;
 
-    if (reactor_ && config_manager_) {
+    if (reactor_) {
         reactor_->set_periodic_callback(
             [this]() {
                 if (draining_.load()) {
@@ -192,6 +213,7 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                 }
                 check_request_timeouts();
                 check_handshake_timeouts();
+                check_backpressure_timeouts();
                 cleanup_rate_limit_entries();
                 try_dequeue_clients();
                 if (session_manager_) {
@@ -360,8 +382,18 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
 
     if (mode_ == "http") {
         http_data_forwarder_ = std::make_unique<HttpDataForwarder>(
-            *reactor_, [this](int fd) { backpressure_manager_->start_tracking(fd); },
-            [this](int fd) { backpressure_manager_->clear_tracking(fd); },
+            *reactor_,
+            [this](int fd) {
+                if (backpressure_manager_->start_tracking(fd)) {
+                    lb::metrics::Metrics::instance().increment_backpressure_events();
+                    lb::metrics::Metrics::instance().increment_backpressure_active();
+                }
+            },
+            [this](int fd) {
+                if (backpressure_manager_->clear_tracking(fd)) {
+                    lb::metrics::Metrics::instance().decrement_backpressure_active();
+                }
+            },
             [this](int fd) { connection_manager_->close_connection(fd); },
             [this](int fd) {
                 auto* conn = connection_manager_->get_connection(fd);
@@ -489,8 +521,18 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     if (use_splice_) {
         if (SpliceForwarder::is_available()) {
             splice_forwarder_ = std::make_unique<SpliceForwarder>(
-                *reactor_, [this](int fd) { backpressure_manager_->start_tracking(fd); },
-                [this](int fd) { backpressure_manager_->clear_tracking(fd); },
+                *reactor_,
+                [this](int fd) {
+                    if (backpressure_manager_->start_tracking(fd)) {
+                        lb::metrics::Metrics::instance().increment_backpressure_events();
+                        lb::metrics::Metrics::instance().increment_backpressure_active();
+                    }
+                },
+                [this](int fd) {
+                    if (backpressure_manager_->clear_tracking(fd)) {
+                        lb::metrics::Metrics::instance().decrement_backpressure_active();
+                    }
+                },
                 [this](int fd) { connection_manager_->close_connection(fd); });
             event_handlers_->set_splice_mode(true);
             lb::logging::Logger::instance().info("Zero-copy splice mode enabled");
@@ -554,6 +596,34 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     if (request_timeout_ms_ > 0) {
         lb::logging::Logger::instance().info(
             "Request timeout enabled: " + std::to_string(request_timeout_ms_) + "ms");
+    }
+
+    if (reactor_) {
+        reactor_->set_periodic_callback(
+            [this]() {
+                if (draining_.load()) {
+                    check_graceful_shutdown();
+                    return;
+                }
+                if (config_manager_ && config_manager_->check_and_reload()) {
+                    auto new_config = config_manager_->get_config();
+                    if (new_config)
+                        apply_config(new_config);
+                }
+                cleanup_drained_backends();
+                if (pool_manager_) {
+                    pool_manager_->evict_expired();
+                }
+                check_request_timeouts();
+                check_handshake_timeouts();
+                check_backpressure_timeouts();
+                cleanup_rate_limit_entries();
+                try_dequeue_clients();
+                if (session_manager_) {
+                    session_manager_->cleanup_expired_sessions();
+                }
+            },
+            1000);
     }
 
     last_applied_config_ = config;
@@ -856,6 +926,34 @@ void LoadBalancer::check_handshake_timeouts() {
         lb::logging::Logger::instance().warn("TLS handshake timeout for fd=" + std::to_string(fd));
         connection_manager_->close_connection(fd);
         handshake_start_times_.erase(fd);
+    }
+}
+
+void LoadBalancer::check_backpressure_timeouts() {
+    if (backpressure_timeout_ms_ == 0)
+        return;
+
+    auto now = std::chrono::steady_clock::now();
+    std::vector<int> timed_out_fds;
+
+    for (const auto& [fd, start_time] : backpressure_start_times_) {
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - start_time).count();
+
+        if (elapsed >= static_cast<int64_t>(backpressure_timeout_ms_)) {
+            auto* conn = connection_manager_->get_connection(fd);
+            if (conn && conn->state() != net::ConnectionState::CLOSED) {
+                timed_out_fds.push_back(fd);
+            }
+        }
+    }
+
+    for (int fd : timed_out_fds) {
+        lb::metrics::Metrics::instance().increment_backpressure_timeouts();
+        lb::logging::Logger::instance().warn("Backpressure timeout for connection fd=" +
+                                             std::to_string(fd));
+        connection_manager_->close_connection(fd);
+        backpressure_start_times_.erase(fd);
     }
 }
 

@@ -21,14 +21,18 @@ void BackpressureManager::check_timeout(int fd, const std::function<void(int)>& 
         close_callback(fd);
 }
 
-void BackpressureManager::start_tracking(int fd) {
+bool BackpressureManager::start_tracking(int fd) {
     auto it = backpressure_start_times_.find(fd);
-    if (it == backpressure_start_times_.end())
+    if (it == backpressure_start_times_.end()) {
         backpressure_start_times_[fd] = std::chrono::steady_clock::now();
+        return true;
+    }
+    return false;
 }
 
-void BackpressureManager::clear_tracking(int fd) {
-    backpressure_start_times_.erase(fd);
+bool BackpressureManager::clear_tracking(int fd) {
+    auto erased = backpressure_start_times_.erase(fd);
+    return erased > 0;
 }
 
 } // namespace lb::core

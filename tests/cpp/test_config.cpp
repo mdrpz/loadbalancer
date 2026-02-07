@@ -134,7 +134,7 @@ void test_config_yaml_override() {
     assert(config->backends[0].weight == 5);
     assert(config->backends[1].host == "10.0.0.2");
     assert(config->backends[1].port == 8001);
-    assert(config->backends[1].weight == 1); // default weight
+    assert(config->backends[1].weight == 1);
 
     std::cout << "YAML config override test passed!\n";
 }
