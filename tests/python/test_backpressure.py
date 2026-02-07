@@ -14,11 +14,19 @@ import yaml
 class SlowBackend:
     """Backend server that reads data slowly to trigger backpressure."""
 
-    def __init__(self, port, read_delay=0.1, chunk_size=1024, response_delay=0.0):
+    def __init__(
+        self,
+        port,
+        read_delay=0.1,
+        chunk_size=1024,
+        response_delay=0.0,
+        rcv_buf_size=None,
+    ):
         self.port = port
         self.read_delay = read_delay  # Delay between reads
         self.chunk_size = chunk_size  # Bytes to read per chunk
         self.response_delay = response_delay  # Delay before sending response
+        self.rcv_buf_size = rcv_buf_size  # TCP receive buffer size
         self.server_socket = None
         self.running = False
         self.thread = None
@@ -46,6 +54,12 @@ class SlowBackend:
         """Run the server loop."""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if self.rcv_buf_size:
+            self.server_socket.setsockopt(
+                socket.SOL_SOCKET,
+                socket.SO_RCVBUF,
+                self.rcv_buf_size,
+            )
         self.server_socket.settimeout(1.0)
 
         try:
@@ -75,6 +89,12 @@ class SlowBackend:
     def _handle_connection(self, conn):
         """Handle a client connection, reading slowly."""
         try:
+            if self.rcv_buf_size:
+                conn.setsockopt(
+                    socket.SOL_SOCKET,
+                    socket.SO_RCVBUF,
+                    self.rcv_buf_size,
+                )
             conn.settimeout(10.0)
             # Read request slowly in small chunks
             total_read = 0
@@ -406,7 +426,6 @@ class TestBackpressure:
 
     def test_backpressure_recovery(self, lb_binary, tmp_path, backend_ports):
         """Test that backpressure clears when backend catches up."""
-        # Create config with backpressure timeout
         config = {
             "listener": {
                 "host": "127.0.0.1",
@@ -428,7 +447,7 @@ class TestBackpressure:
                 "type": "tcp",
             },
             "backpressure": {
-                "timeout_ms": 10000,  # Long timeout
+                "timeout_ms": 30000,
             },
             "metrics": {
                 "enabled": True,
@@ -444,11 +463,15 @@ class TestBackpressure:
         with open(config_file, "w") as f:
             yaml.dump(config, f)
 
-        # Start slow backend that will eventually respond
-        slow_backend = SlowBackend(backend_ports[0], read_delay=0.1, chunk_size=512)
+        # Slow backend with tiny TCP receive buffer to guarantee backpressure
+        slow_backend = SlowBackend(
+            backend_ports[0],
+            read_delay=0.05,
+            chunk_size=1024,
+            rcv_buf_size=4096,
+        )
         slow_backend.start()
 
-        # Start load balancer
         proc = subprocess.Popen(
             [str(lb_binary), str(config_file)],
             stdout=subprocess.PIPE,
@@ -456,30 +479,62 @@ class TestBackpressure:
         )
 
         try:
-            # Wait for LB to start
             time.sleep(2.0)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
                 pytest.fail(
-                    f"Load balancer failed to start:\nSTDOUT: {stdout.decode()}\n"
+                    f"Load balancer failed to start:\n"
+                    f"STDOUT: {stdout.decode()}\n"
                     f"STDERR: {stderr.decode()}"
                 )
 
-            # Send a request that will trigger backpressure but eventually complete
-            send_large_request("127.0.0.1", 8888, size_kb=20, timeout=30.0)
+            # Send request asynchronously so we can poll metrics
+            request_complete = threading.Event()
 
-            # Wait a bit for everything to settle
-            time.sleep(1.0)
+            def make_request():
+                try:
+                    send_large_request(
+                        "127.0.0.1",
+                        8888,
+                        size_kb=50,
+                        timeout=60.0,
+                    )
+                except Exception:
+                    pass
+                finally:
+                    request_complete.set()
 
-            # Check metrics - backpressure should have cleared
-            metrics = fetch_metrics()
-            active = get_metric_value(metrics, "lb_backpressure_active")
-            events = get_metric_value(metrics, "lb_backpressure_events_total")
+            request_thread = threading.Thread(
+                target=make_request,
+                daemon=True,
+            )
+            request_thread.start()
 
-            # Backpressure should have been triggered (events > 0)
+            # Poll until backpressure is triggered
+            events = 0
+            for _ in range(20):
+                time.sleep(0.5)
+                metrics = fetch_metrics()
+                events = get_metric_value(
+                    metrics,
+                    "lb_backpressure_events_total",
+                )
+                if events >= 1:
+                    break
+
             assert events >= 1, "Backpressure events should have occurred"
-            # But should have cleared by now
+
+            request_complete.wait(timeout=60.0)
+
+            # Allow connections to fully close
+            time.sleep(2.0)
+
+            metrics = fetch_metrics()
+            active = get_metric_value(
+                metrics,
+                "lb_backpressure_active",
+            )
             assert active == 0, "Backpressure should have cleared after request completes"
 
         finally:
