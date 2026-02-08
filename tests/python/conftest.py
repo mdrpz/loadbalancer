@@ -12,6 +12,26 @@ import pytest
 import yaml
 
 
+def wait_for_port(port, host="127.0.0.1", timeout=5.0):
+    """Block until *host:port* accepts a TCP connection (or *timeout* expires)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.1)
+        try:
+            s.connect((host, port))
+            s.close()
+            return True
+        except (ConnectionRefusedError, socket.timeout, OSError):
+            time.sleep(0.05)
+        finally:
+            try:
+                s.close()
+            except OSError:
+                pass
+    return False
+
+
 @pytest.fixture(scope="session")
 def lb_binary():
     """Path to the load balancer binary."""
@@ -121,7 +141,7 @@ class BackendServer:
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
-        time.sleep(0.2)
+        wait_for_port(self.port, timeout=3.0)
 
     def stop(self):
         """Stop the backend server."""
@@ -228,9 +248,9 @@ def lb_process(lb_binary, tmp_path, lb_port, backend_ports, backend_servers):
         stderr=subprocess.PIPE,
     )
 
-    # Wait for LB to start and health checks to mark backends healthy
-    # With 200ms interval and success_threshold=1, this should be enough
-    time.sleep(2.0)
+    # Wait for LB to accept connections, then give health checks time to pass
+    wait_for_port(lb_port, timeout=5.0)
+    time.sleep(0.5)
 
     if proc.poll() is not None:
         stdout, stderr = proc.communicate()

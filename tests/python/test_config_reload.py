@@ -4,7 +4,7 @@ import subprocess
 import time
 
 import yaml
-from conftest import send_http_request
+from conftest import send_http_request, wait_for_port
 
 
 class TestConfigReload:
@@ -54,7 +54,8 @@ class TestConfigReload:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Verify both backends receive traffic
             initial_responses = []
@@ -78,8 +79,8 @@ class TestConfigReload:
             with open(config_file, "w") as f:
                 yaml.dump(updated_config, f)
 
-            # Wait for config reload (checks every 5 seconds)
-            time.sleep(6.0)
+            # Wait for config reload (periodic callback ~1 s)
+            time.sleep(3.0)
 
             # Send more requests - should only go to remaining backend
             after_responses = []
@@ -149,7 +150,8 @@ class TestConfigReload:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Verify only one backend receives traffic
             initial_responses = []
@@ -175,7 +177,7 @@ class TestConfigReload:
                 yaml.dump(updated_config, f)
 
             # Wait for config reload + health check
-            time.sleep(6.0)
+            time.sleep(3.0)
 
             # Send more requests - should now go to both backends
             after_responses = []

@@ -6,7 +6,7 @@ import threading
 import time
 
 import pytest
-from conftest import create_test_config, send_http_request
+from conftest import create_test_config, send_http_request, wait_for_port
 
 
 class TestGracefulShutdown:
@@ -24,7 +24,8 @@ class TestGracefulShutdown:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Verify LB is working
             response = send_http_request("127.0.0.1", lb_port)
@@ -66,7 +67,8 @@ class TestGracefulShutdown:
                 time.sleep(0.05)
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Send requests before shutdown
             send_requests("before", 5)

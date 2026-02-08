@@ -8,6 +8,7 @@ import time
 
 import pytest
 import yaml
+from conftest import wait_for_port
 
 
 class EchoBackend:
@@ -25,7 +26,7 @@ class EchoBackend:
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
-        time.sleep(0.2)
+        wait_for_port(self.port, timeout=3.0)
 
     def stop(self):
         """Stop the echo server."""
@@ -202,8 +203,8 @@ class TestSplice:
         )
 
         try:
-            # Wait for LB to start
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
@@ -279,8 +280,8 @@ class TestSplice:
         )
 
         try:
-            # Wait for LB to start
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
@@ -356,8 +357,8 @@ class TestSplice:
         )
 
         try:
-            # Wait for LB to start
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
@@ -434,8 +435,8 @@ class TestSplice:
         )
 
         try:
-            # Wait for LB to start
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()

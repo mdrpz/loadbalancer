@@ -8,6 +8,7 @@ import urllib.request
 
 import pytest
 import yaml
+from conftest import wait_for_port
 
 
 class HoldingBackend:
@@ -25,7 +26,7 @@ class HoldingBackend:
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
-        time.sleep(0.2)
+        wait_for_port(self.port, timeout=3.0)
 
     def stop(self):
         self.running = False
@@ -92,7 +93,7 @@ class CrashingBackend:
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
-        time.sleep(0.2)
+        wait_for_port(self.port, timeout=3.0)
 
     def stop(self):
         self.running = False
@@ -172,13 +173,15 @@ def write_config(path, config):
     return path
 
 
-def start_lb(lb_binary, config_file):
+def start_lb(lb_binary, config_file, port=None):
     proc = subprocess.Popen(
         [str(lb_binary), str(config_file)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    time.sleep(2.0)
+    if port:
+        wait_for_port(port, timeout=5.0)
+    time.sleep(0.5)
     if proc.poll() is not None:
         stdout, stderr = proc.communicate()
         pytest.fail(f"LB failed to start:\nSTDOUT: {stdout.decode()}\nSTDERR: {stderr.decode()}")
@@ -261,7 +264,7 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         held = []
         try:
@@ -341,11 +344,11 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         try:
             # Wait for at least one periodic callback (1 s)
-            time.sleep(2.0)
+            time.sleep(1.0)
 
             metrics = fetch_metrics(metrics_port)
             limit = get_metric(metrics, "lb_memory_budget_limit_bytes")
@@ -401,7 +404,7 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         try:
             # Wait for health checks to mark both backends UNHEALTHY
@@ -488,7 +491,7 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -559,7 +562,7 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         try:
             for _ in range(5):
@@ -608,18 +611,18 @@ class TestEdgeCases:
 
         config_file = tmp_path / "config.yaml"
         write_config(config_file, config)
-        proc = start_lb(lb_binary, config_file)
+        proc = start_lb(lb_binary, config_file, port=lb_port)
 
         try:
             resp = send_http_get("127.0.0.1", lb_port)
             assert resp.startswith("backend-"), f"Should work initially: {resp}"
 
             # Overwrite with garbage YAML
-            time.sleep(1.5)
+            time.sleep(1.0)
             with open(config_file, "w") as f:
                 f.write("listener:\n  port: [[[INVALID\n  !!garbage!!")
 
-            time.sleep(2.0)
+            time.sleep(1.5)
 
             resp = send_http_get("127.0.0.1", lb_port)
             assert resp.startswith("backend-"), f"Should still work after malformed reload: {resp}"
@@ -662,7 +665,7 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         try:
             for _ in range(100):
@@ -732,7 +735,7 @@ class TestEdgeCases:
         }
 
         cfg = write_config(tmp_path / "config.yaml", config)
-        proc = start_lb(lb_binary, cfg)
+        proc = start_lb(lb_binary, cfg, port=lb_port)
 
         sock = None
         try:

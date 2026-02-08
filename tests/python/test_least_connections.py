@@ -4,7 +4,7 @@ import subprocess
 import time
 
 import pytest
-from conftest import create_test_config, send_http_request
+from conftest import create_test_config, send_http_request, wait_for_port
 
 
 @pytest.fixture
@@ -21,7 +21,8 @@ def lb_process_lc(lb_binary, tmp_path, backend_ports, backend_servers):
         stderr=subprocess.PIPE,
     )
 
-    time.sleep(2.0)
+    wait_for_port(lb_port, timeout=5.0)
+    time.sleep(0.5)
 
     if proc.poll() is not None:
         stdout, stderr = proc.communicate()

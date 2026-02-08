@@ -3,7 +3,7 @@
 import subprocess
 import time
 
-from conftest import create_test_config, send_http_request
+from conftest import create_test_config, send_http_request, wait_for_port
 
 
 class TestHealthCheck:
@@ -23,7 +23,8 @@ class TestHealthCheck:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Verify both backends are receiving traffic
             initial_responses = []

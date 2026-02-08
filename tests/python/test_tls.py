@@ -6,7 +6,7 @@ import subprocess
 import time
 
 import yaml
-from conftest import send_http_request
+from conftest import send_http_request, wait_for_port
 
 
 class TestTLS:
@@ -123,7 +123,8 @@ class TestTLS:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Send HTTPS request
             response = self._send_https_request("127.0.0.1", lb_port)
@@ -195,7 +196,8 @@ class TestTLS:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(lb_port, timeout=5.0)
+            time.sleep(0.5)
 
             # Plain HTTP should fail (LB expects TLS handshake)
             response = send_http_request("127.0.0.1", lb_port)

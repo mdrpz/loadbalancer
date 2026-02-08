@@ -9,6 +9,7 @@ import urllib.request
 
 import pytest
 import yaml
+from conftest import wait_for_port
 
 
 class SlowBackend:
@@ -37,7 +38,7 @@ class SlowBackend:
         self.running = True
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
-        time.sleep(0.2)
+        wait_for_port(self.port, timeout=3.0)
 
     def stop(self):
         """Stop the slow backend server."""
@@ -264,8 +265,8 @@ class TestBackpressure:
         )
 
         try:
-            # Wait for LB to start
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
@@ -381,8 +382,8 @@ class TestBackpressure:
         )
 
         try:
-            # Wait for LB to start
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
@@ -479,7 +480,8 @@ class TestBackpressure:
         )
 
         try:
-            time.sleep(2.0)
+            wait_for_port(8888, timeout=5.0)
+            time.sleep(0.5)
 
             if proc.poll() is not None:
                 stdout, stderr = proc.communicate()
@@ -528,7 +530,7 @@ class TestBackpressure:
             request_complete.wait(timeout=60.0)
 
             # Allow connections to fully close
-            time.sleep(2.0)
+            time.sleep(0.5)
 
             metrics = fetch_metrics()
             active = get_metric_value(
