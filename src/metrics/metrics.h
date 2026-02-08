@@ -31,6 +31,9 @@ public:
     void increment_backpressure_active();
     void decrement_backpressure_active();
 
+    void set_memory_budget_used(uint64_t bytes);
+    void set_memory_budget_limit(uint64_t bytes);
+
     void add_bytes_in(uint64_t bytes);
     void add_bytes_out(uint64_t bytes);
     void record_request_latency_ms(double latency_ms);
@@ -49,6 +52,8 @@ public:
     uint64_t get_backpressure_events() const;
     uint64_t get_backpressure_timeouts() const;
     uint64_t get_backpressure_active() const;
+    uint64_t get_memory_budget_used() const;
+    uint64_t get_memory_budget_limit() const;
     uint64_t get_bytes_in() const;
     uint64_t get_bytes_out() const;
 
@@ -70,6 +75,8 @@ private:
     std::atomic<uint64_t> backpressure_events_{0};
     std::atomic<uint64_t> backpressure_timeouts_{0};
     std::atomic<uint64_t> backpressure_active_{0};
+    std::atomic<uint64_t> memory_budget_used_{0};
+    std::atomic<uint64_t> memory_budget_limit_{0};
     std::atomic<uint64_t> bytes_in_{0};
     std::atomic<uint64_t> bytes_out_{0};
 

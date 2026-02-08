@@ -60,6 +60,22 @@ void Metrics::increment_bad_requests() {
     bad_requests_++;
 }
 
+void Metrics::set_memory_budget_used(uint64_t bytes) {
+    memory_budget_used_.store(bytes, std::memory_order_release);
+}
+
+void Metrics::set_memory_budget_limit(uint64_t bytes) {
+    memory_budget_limit_.store(bytes, std::memory_order_release);
+}
+
+uint64_t Metrics::get_memory_budget_used() const {
+    return memory_budget_used_.load(std::memory_order_acquire);
+}
+
+uint64_t Metrics::get_memory_budget_limit() const {
+    return memory_budget_limit_.load(std::memory_order_acquire);
+}
+
 void Metrics::increment_backpressure_events() {
     backpressure_events_++;
 }
@@ -203,6 +219,14 @@ std::string Metrics::export_prometheus() const {
     oss << "# HELP lb_memory_budget_drops_total Connections dropped due to memory budget\n";
     oss << "# TYPE lb_memory_budget_drops_total counter\n";
     oss << "lb_memory_budget_drops_total " << get_memory_budget_drops() << "\n\n";
+
+    oss << "# HELP lb_memory_budget_used_bytes Current memory budget usage in bytes\n";
+    oss << "# TYPE lb_memory_budget_used_bytes gauge\n";
+    oss << "lb_memory_budget_used_bytes " << get_memory_budget_used() << "\n\n";
+
+    oss << "# HELP lb_memory_budget_limit_bytes Memory budget limit in bytes\n";
+    oss << "# TYPE lb_memory_budget_limit_bytes gauge\n";
+    oss << "lb_memory_budget_limit_bytes " << get_memory_budget_limit() << "\n\n";
 
     oss << "# HELP lb_bad_requests_total Invalid HTTP requests (400 Bad Request)\n";
     oss << "# TYPE lb_bad_requests_total counter\n";

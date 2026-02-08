@@ -219,6 +219,12 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                 if (session_manager_) {
                     session_manager_->cleanup_expired_sessions();
                 }
+                if (memory_budget_) {
+                    lb::metrics::Metrics::instance().set_memory_budget_used(
+                        memory_budget_->used_bytes());
+                    lb::metrics::Metrics::instance().set_memory_budget_limit(
+                        memory_budget_->limit_bytes());
+                }
             },
             1000);
     }
@@ -365,6 +371,7 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     max_connections_per_backend_ = config->max_connections_per_backend;
     if (backend_connector_) {
         backend_connector_->set_max_connections_per_backend(max_connections_per_backend_);
+        backend_connector_->set_backend_socket_sndbuf(config->backend_socket_sndbuf);
         backend_connector_->set_session_manager(session_manager_.get());
         backend_connector_->set_sticky_config(config->sticky_sessions_enabled,
                                               config->sticky_sessions_method,
@@ -376,6 +383,14 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     graceful_shutdown_timeout_seconds_ = config->graceful_shutdown_timeout_seconds;
     tls_handshake_timeout_ms_ = config->tls_handshake_timeout_ms;
     mode_ = config->mode.empty() ? "tcp" : config->mode;
+
+    if (memory_budget_) {
+        if (config->global_buffer_budget_kb > 0)
+            memory_budget_->set_limit_bytes(static_cast<uint64_t>(config->global_buffer_budget_kb) *
+                                            1024ULL);
+        else
+            memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
+    }
 
     backpressure_manager_ =
         std::make_unique<BackpressureManager>(backpressure_start_times_, backpressure_timeout_ms_);
@@ -562,7 +577,11 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
     }
 
     if (memory_budget_) {
-        memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
+        if (config->global_buffer_budget_kb > 0)
+            memory_budget_->set_limit_bytes(static_cast<uint64_t>(config->global_buffer_budget_kb) *
+                                            1024ULL);
+        else
+            memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
     }
 
     pool_enabled_ = config->connection_pool_enabled;
@@ -621,6 +640,12 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
                 try_dequeue_clients();
                 if (session_manager_) {
                     session_manager_->cleanup_expired_sessions();
+                }
+                if (memory_budget_) {
+                    lb::metrics::Metrics::instance().set_memory_budget_used(
+                        memory_budget_->used_bytes());
+                    lb::metrics::Metrics::instance().set_memory_budget_limit(
+                        memory_budget_->limit_bytes());
                 }
             },
             1000);
@@ -740,7 +765,11 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
     graceful_shutdown_timeout_seconds_ = config->graceful_shutdown_timeout_seconds;
     tls_handshake_timeout_ms_ = config->tls_handshake_timeout_ms;
     if (memory_budget_) {
-        memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
+        if (config->global_buffer_budget_kb > 0)
+            memory_budget_->set_limit_bytes(static_cast<uint64_t>(config->global_buffer_budget_kb) *
+                                            1024ULL);
+        else
+            memory_budget_->set_limit_mb(config->global_buffer_budget_mb);
     }
 
     if (backend_pool_) {
@@ -756,6 +785,7 @@ void LoadBalancer::apply_config(const std::shared_ptr<const lb::config::Config>&
     }
 
     if (backend_connector_) {
+        backend_connector_->set_backend_socket_sndbuf(config->backend_socket_sndbuf);
         backend_connector_->set_sticky_config(config->sticky_sessions_enabled,
                                               config->sticky_sessions_method,
                                               config->sticky_sessions_ttl_seconds);

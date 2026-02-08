@@ -41,6 +41,8 @@ ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_
     config_->access_log_enabled = false;
     config_->request_timeout_ms = 30000;
     config_->global_buffer_budget_mb = 512;
+    config_->global_buffer_budget_kb = 0;
+    config_->backend_socket_sndbuf = 0;
     config_->backpressure_timeout_ms = 10000;
     config_->graceful_shutdown_timeout_seconds = 30;
     config_->tls_handshake_timeout_ms = 10000;
@@ -250,6 +252,11 @@ bool ConfigManager::load_from_file(const std::string& path) {
             if (memory["global_buffer_budget_mb"])
                 new_config->global_buffer_budget_mb =
                     memory["global_buffer_budget_mb"].as<uint32_t>();
+            if (memory["global_buffer_budget_kb"])
+                new_config->global_buffer_budget_kb =
+                    memory["global_buffer_budget_kb"].as<uint32_t>();
+            if (memory["backend_socket_sndbuf"])
+                new_config->backend_socket_sndbuf = memory["backend_socket_sndbuf"].as<uint32_t>();
         }
 
         if (config["backpressure"]) {

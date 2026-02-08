@@ -38,6 +38,7 @@ public:
     void set_backend_selected_callback(BackendSelectedCallback callback);
 
     void set_max_connections_per_backend(uint32_t max_connections);
+    void set_backend_socket_sndbuf(uint32_t sndbuf);
 
     struct BackendInfo {
         std::string host;
@@ -64,6 +65,7 @@ private:
     BackendSelectedCallback backend_selected_callback_;
     std::function<void(net::Connection*)> connection_init_callback_;
     SessionManager* session_manager_ = nullptr;
+    uint32_t backend_socket_sndbuf_ = 0;
     bool sticky_sessions_enabled_ = false;
     std::string sticky_sessions_method_;
     uint32_t sticky_sessions_ttl_seconds_ = 3600;

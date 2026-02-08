@@ -12,3 +12,6 @@ add_executable(test_health test_health.cpp)
 target_link_libraries(test_health PRIVATE lb_lib)
 add_test(NAME health_tests COMMAND test_health)
 
+add_executable(test_memory_budget test_memory_budget.cpp)
+target_link_libraries(test_memory_budget PRIVATE lb_lib)
+add_test(NAME memory_budget_tests COMMAND test_memory_budget)

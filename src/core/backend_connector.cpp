@@ -46,6 +46,10 @@ void BackendConnector::set_max_connections_per_backend(uint32_t max_connections)
     max_connections_per_backend_ = max_connections;
 }
 
+void BackendConnector::set_backend_socket_sndbuf(uint32_t sndbuf) {
+    backend_socket_sndbuf_ = sndbuf;
+}
+
 void BackendConnector::set_session_manager(SessionManager* session_manager) {
     session_manager_ = session_manager;
 }
@@ -164,6 +168,11 @@ void BackendConnector::connect(std::unique_ptr<net::Connection> client_conn, int
     int opt = 1;
     if (setsockopt(backend_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
         std::cerr << "Failed to set socket option: " << strerror(errno) << std::endl;
+    }
+
+    if (backend_socket_sndbuf_ > 0) {
+        int sndbuf = static_cast<int>(backend_socket_sndbuf_);
+        setsockopt(backend_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
     }
 
     struct addrinfo hints {

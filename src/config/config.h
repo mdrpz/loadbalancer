@@ -59,6 +59,8 @@ struct Config {
     uint32_t request_timeout_ms;
 
     uint32_t global_buffer_budget_mb;
+    uint32_t global_buffer_budget_kb;
+    uint32_t backend_socket_sndbuf;
 
     uint32_t backpressure_timeout_ms;
 
