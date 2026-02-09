@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include "core/thread_pool.h"
 #ifdef _POSIX_C_SOURCE
 #define HAVE_LOCALTIME_R
 #endif
@@ -41,17 +42,39 @@ void Logger::set_output_file(const std::string& path) {
         log_file_ = stderr;
 }
 
+void Logger::set_thread_pool(lb::core::ThreadPool* pool) {
+    auto* old = thread_pool_.exchange(pool, std::memory_order_acq_rel);
+    if (pool && !old) {
+        queue_cv_.notify_all();
+        if (worker_thread_.joinable())
+            worker_thread_.join();
+    } else if (!pool && old && running_.load(std::memory_order_acquire)) {
+        worker_thread_ = std::thread(&Logger::worker_loop, this);
+    }
+}
+
 void Logger::start() {
     if (running_.exchange(true))
         return;
-    worker_thread_ = std::thread(&Logger::worker_thread, this);
+    if (!thread_pool_.load(std::memory_order_acquire))
+        worker_thread_ = std::thread(&Logger::worker_loop, this);
 }
 
 void Logger::stop() {
-    if (running_.exchange(false))
-        queue_cv_.notify_all();
+    if (!running_.exchange(false))
+        return;
+
+    thread_pool_.store(nullptr, std::memory_order_release);
+
+    queue_cv_.notify_all();
     if (worker_thread_.joinable())
         worker_thread_.join();
+
+    while (drain_pending_.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    drain_queue();
 }
 
 void Logger::log(LogLevel level, const std::string& message) {
@@ -98,11 +121,22 @@ void Logger::log(LogLevel level, const std::string& message) {
 
     oss << "] " << message << "\n";
 
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    if (log_queue_.size() >= MAX_QUEUE_SIZE)
-        return;
-    log_queue_.push(oss.str());
-    queue_cv_.notify_one();
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (log_queue_.size() >= MAX_QUEUE_SIZE)
+            return;
+        log_queue_.push(oss.str());
+    }
+
+    auto* pool = thread_pool_.load(std::memory_order_acquire);
+    if (pool) {
+        bool expected = false;
+        if (drain_pending_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            pool->post([this]() { drain_queue(); });
+        }
+    } else {
+        queue_cv_.notify_one();
+    }
 }
 
 void Logger::debug(const std::string& message) {
@@ -121,20 +155,39 @@ void Logger::error(const std::string& message) {
     log(LogLevel::ERROR, message);
 }
 
-void Logger::worker_thread() {
-    while (running_) {
+void Logger::worker_loop() {
+    while (running_.load(std::memory_order_acquire)) {
+        if (thread_pool_.load(std::memory_order_acquire))
+            return;
+
         std::unique_lock<std::mutex> lock(queue_mutex_);
-        queue_cv_.wait(lock, [this] { return !log_queue_.empty() || !running_; });
+        queue_cv_.wait(lock, [this] {
+            return !log_queue_.empty() || !running_ || thread_pool_.load(std::memory_order_acquire);
+        });
+
+        if (thread_pool_.load(std::memory_order_acquire))
+            return;
 
         while (!log_queue_.empty()) {
             std::string log_line = log_queue_.front();
             log_queue_.pop();
             lock.unlock();
-
             write_log(log_line);
-
             lock.lock();
         }
+    }
+}
+
+void Logger::drain_queue() {
+    drain_pending_.store(false, std::memory_order_release);
+
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    while (!log_queue_.empty()) {
+        std::string log_line = std::move(log_queue_.front());
+        log_queue_.pop();
+        lock.unlock();
+        write_log(log_line);
+        lock.lock();
     }
 }
 

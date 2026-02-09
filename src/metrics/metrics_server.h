@@ -6,6 +6,10 @@
 #include <string>
 #include <thread>
 
+namespace lb::core {
+class ThreadPool;
+} // namespace lb::core
+
 namespace lb::metrics {
 
 class MetricsServer {
@@ -16,6 +20,8 @@ public:
     void start();
     void stop();
 
+    void set_thread_pool(lb::core::ThreadPool* pool);
+
 private:
     void run_loop();
     static void handle_request(int client_fd);
@@ -25,6 +31,9 @@ private:
     int listener_fd_;
     std::thread thread_;
     std::atomic<bool> running_;
+
+    lb::core::ThreadPool* thread_pool_{nullptr};
+    std::atomic<bool> pool_task_active_{false};
 };
 
 } // namespace lb::metrics

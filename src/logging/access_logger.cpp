@@ -2,6 +2,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include "core/thread_pool.h"
 
 namespace lb::logging {
 
@@ -24,6 +25,17 @@ void AccessLogger::set_enabled(bool enabled) {
     enabled_ = enabled;
 }
 
+void AccessLogger::set_thread_pool(lb::core::ThreadPool* pool) {
+    auto* old = thread_pool_.exchange(pool, std::memory_order_acq_rel);
+    if (pool && !old) {
+        queue_cv_.notify_all();
+        if (worker_thread_.joinable())
+            worker_thread_.join();
+    } else if (!pool && old && running_.load(std::memory_order_acquire)) {
+        worker_thread_ = std::thread(&AccessLogger::worker_loop, this);
+    }
+}
+
 void AccessLogger::start() {
     if (running_.load() || !enabled_)
         return;
@@ -33,18 +45,25 @@ void AccessLogger::start() {
     }
 
     running_ = true;
-    worker_thread_ = std::thread(&AccessLogger::worker_thread, this);
+    if (!thread_pool_.load(std::memory_order_acquire))
+        worker_thread_ = std::thread(&AccessLogger::worker_loop, this);
 }
 
 void AccessLogger::stop() {
-    if (!running_.load())
+    if (!running_.exchange(false))
         return;
 
-    running_ = false;
-    queue_cv_.notify_one();
+    thread_pool_.store(nullptr, std::memory_order_release);
 
+    queue_cv_.notify_all();
     if (worker_thread_.joinable())
         worker_thread_.join();
+
+    while (drain_pending_.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
+
+    drain_queue();
 
     if (log_file_) {
         fclose(log_file_);
@@ -53,38 +72,71 @@ void AccessLogger::stop() {
 }
 
 void AccessLogger::log(const AccessLogEntry& entry) {
-    if (!enabled_ || !running_.load())
+    if (!enabled_ || !running_.load(std::memory_order_acquire))
         return;
 
-    std::lock_guard<std::mutex> lock(queue_mutex_);
-    if (log_queue_.size() < MAX_QUEUE_SIZE) {
+    {
+        std::lock_guard<std::mutex> lock(queue_mutex_);
+        if (log_queue_.size() >= MAX_QUEUE_SIZE)
+            return;
         log_queue_.push(entry);
+    }
+
+    auto* pool = thread_pool_.load(std::memory_order_acquire);
+    if (pool) {
+        bool expected = false;
+        if (drain_pending_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            pool->post([this]() { drain_queue(); });
+        }
+    } else {
         queue_cv_.notify_one();
     }
 }
 
-void AccessLogger::worker_thread() {
-    while (running_.load()) {
+void AccessLogger::worker_loop() {
+    while (running_.load(std::memory_order_acquire)) {
+        if (thread_pool_.load(std::memory_order_acquire))
+            return;
+
         std::unique_lock<std::mutex> lock(queue_mutex_);
-        queue_cv_.wait(lock, [this] { return !log_queue_.empty() || !running_.load(); });
+        queue_cv_.wait(lock, [this] {
+            return !log_queue_.empty() || !running_ || thread_pool_.load(std::memory_order_acquire);
+        });
+
+        if (thread_pool_.load(std::memory_order_acquire))
+            return;
 
         while (!log_queue_.empty()) {
             AccessLogEntry entry = std::move(log_queue_.front());
             log_queue_.pop();
             lock.unlock();
-
-            std::string log_line = format_entry(entry);
-
-            if (log_file_) {
-                fprintf(log_file_, "%s\n", log_line.c_str());
-                fflush(log_file_);
-            } else {
-                fprintf(stdout, "%s\n", log_line.c_str());
-                fflush(stdout);
-            }
-
+            write_entry(entry);
             lock.lock();
         }
+    }
+}
+
+void AccessLogger::drain_queue() {
+    drain_pending_.store(false, std::memory_order_release);
+
+    std::unique_lock<std::mutex> lock(queue_mutex_);
+    while (!log_queue_.empty()) {
+        AccessLogEntry entry = std::move(log_queue_.front());
+        log_queue_.pop();
+        lock.unlock();
+        write_entry(entry);
+        lock.lock();
+    }
+}
+
+void AccessLogger::write_entry(const AccessLogEntry& entry) {
+    std::string log_line = format_entry(entry);
+    if (log_file_) {
+        fprintf(log_file_, "%s\n", log_line.c_str());
+        fflush(log_file_);
+    } else {
+        fprintf(stdout, "%s\n", log_line.c_str());
+        fflush(stdout);
     }
 }
 

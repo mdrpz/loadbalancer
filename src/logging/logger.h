@@ -8,6 +8,10 @@
 #include <string>
 #include <thread>
 
+namespace lb::core {
+class ThreadPool;
+} // namespace lb::core
+
 namespace lb::logging {
 
 enum class LogLevel { DEBUG, INFO, WARN, ERROR };
@@ -28,11 +32,14 @@ public:
     void start();
     void stop();
 
+    void set_thread_pool(lb::core::ThreadPool* pool);
+
 private:
     Logger();
     ~Logger();
 
-    void worker_thread();
+    void worker_loop();
+    void drain_queue();
     void write_log(const std::string& log_line);
 
     LogLevel level_;
@@ -45,6 +52,9 @@ private:
     std::thread worker_thread_;
     std::atomic<bool> running_;
     static constexpr size_t MAX_QUEUE_SIZE = 10000;
+
+    std::atomic<lb::core::ThreadPool*> thread_pool_{nullptr};
+    std::atomic<bool> drain_pending_{false};
 };
 
 } // namespace lb::logging

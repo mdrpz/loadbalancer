@@ -145,6 +145,9 @@ LoadBalancer::LoadBalancer()
 }
 
 LoadBalancer::~LoadBalancer() {
+    lb::logging::Logger::instance().set_thread_pool(nullptr);
+    lb::logging::AccessLogger::instance().set_thread_pool(nullptr);
+
     if (health_checker_)
         health_checker_->stop();
 
@@ -161,6 +164,10 @@ LoadBalancer::~LoadBalancer() {
             conn->close();
     }
     connections_.clear();
+}
+
+ThreadPool* LoadBalancer::thread_pool() const {
+    return thread_pool_.get();
 }
 
 bool LoadBalancer::initialize(const std::string& listen_host, uint16_t listen_port) {
@@ -202,11 +209,37 @@ void LoadBalancer::set_config_manager(lb::config::ConfigManager* config_manager)
                     check_graceful_shutdown();
                     return;
                 }
-                if (config_manager_ && config_manager_->check_and_reload()) {
-                    auto new_config = config_manager_->get_config();
-                    if (new_config)
-                        apply_config(new_config);
+
+                {
+                    std::lock_guard<std::mutex> lock(pending_config_mutex_);
+                    if (pending_config_) {
+                        apply_config(pending_config_);
+                        pending_config_.reset();
+                    }
                 }
+
+                if (config_manager_ && !config_check_in_progress_.load(std::memory_order_acquire)) {
+                    if (thread_pool_) {
+                        config_check_in_progress_.store(true, std::memory_order_release);
+                        thread_pool_->post([this]() {
+                            if (config_manager_->check_and_reload()) {
+                                auto new_config = config_manager_->get_config();
+                                if (new_config) {
+                                    std::lock_guard<std::mutex> lock(pending_config_mutex_);
+                                    pending_config_ = new_config;
+                                }
+                            }
+                            config_check_in_progress_.store(false, std::memory_order_release);
+                        });
+                    } else {
+                        if (config_manager_->check_and_reload()) {
+                            auto new_config = config_manager_->get_config();
+                            if (new_config)
+                                apply_config(new_config);
+                        }
+                    }
+                }
+
                 cleanup_drained_backends();
                 if (pool_manager_) {
                     pool_manager_->evict_expired();
@@ -364,6 +397,9 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
         lb::logging::Logger::instance().info("Thread pool initialized with " +
                                              std::to_string(config->thread_pool_worker_count) +
                                              " workers");
+
+        lb::logging::Logger::instance().set_thread_pool(thread_pool_.get());
+        lb::logging::AccessLogger::instance().set_thread_pool(thread_pool_.get());
     } else {
         thread_pool_.reset();
     }
@@ -624,11 +660,37 @@ bool LoadBalancer::initialize_from_config(const std::shared_ptr<const lb::config
                     check_graceful_shutdown();
                     return;
                 }
-                if (config_manager_ && config_manager_->check_and_reload()) {
-                    auto new_config = config_manager_->get_config();
-                    if (new_config)
-                        apply_config(new_config);
+
+                {
+                    std::lock_guard<std::mutex> lock(pending_config_mutex_);
+                    if (pending_config_) {
+                        apply_config(pending_config_);
+                        pending_config_.reset();
+                    }
                 }
+
+                if (config_manager_ && !config_check_in_progress_.load(std::memory_order_acquire)) {
+                    if (thread_pool_) {
+                        config_check_in_progress_.store(true, std::memory_order_release);
+                        thread_pool_->post([this]() {
+                            if (config_manager_->check_and_reload()) {
+                                auto new_config = config_manager_->get_config();
+                                if (new_config) {
+                                    std::lock_guard<std::mutex> lock(pending_config_mutex_);
+                                    pending_config_ = new_config;
+                                }
+                            }
+                            config_check_in_progress_.store(false, std::memory_order_release);
+                        });
+                    } else {
+                        if (config_manager_->check_and_reload()) {
+                            auto new_config = config_manager_->get_config();
+                            if (new_config)
+                                apply_config(new_config);
+                        }
+                    }
+                }
+
                 cleanup_drained_backends();
                 if (pool_manager_) {
                     pool_manager_->evict_expired();

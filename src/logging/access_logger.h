@@ -8,6 +8,10 @@
 #include <string>
 #include <thread>
 
+namespace lb::core {
+class ThreadPool;
+} // namespace lb::core
+
 namespace lb::logging {
 
 struct AccessLogEntry {
@@ -34,11 +38,15 @@ public:
     void start();
     void stop();
 
+    void set_thread_pool(lb::core::ThreadPool* pool);
+
 private:
     AccessLogger();
     ~AccessLogger();
 
-    void worker_thread();
+    void worker_loop();
+    void drain_queue();
+    void write_entry(const AccessLogEntry& entry);
     std::string format_entry(const AccessLogEntry& entry) const;
     std::string format_timestamp(const std::chrono::system_clock::time_point& tp) const;
 
@@ -52,6 +60,9 @@ private:
     std::thread worker_thread_;
     std::atomic<bool> running_{false};
     static constexpr size_t MAX_QUEUE_SIZE = 10000;
+
+    std::atomic<lb::core::ThreadPool*> thread_pool_{nullptr};
+    std::atomic<bool> drain_pending_{false};
 };
 
 } // namespace lb::logging

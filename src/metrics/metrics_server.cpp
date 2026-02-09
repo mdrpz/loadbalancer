@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sstream>
+#include "core/thread_pool.h"
 #include "metrics/metrics.h"
 
 namespace lb::metrics {
@@ -15,6 +16,10 @@ MetricsServer::MetricsServer(uint16_t port) : port_(port), listener_fd_(-1), run
 
 MetricsServer::~MetricsServer() {
     stop();
+}
+
+void MetricsServer::set_thread_pool(lb::core::ThreadPool* pool) {
+    thread_pool_ = pool;
 }
 
 void MetricsServer::start() {
@@ -57,15 +62,30 @@ void MetricsServer::start() {
     }
 
     running_ = true;
-    thread_ = std::thread(&MetricsServer::run_loop, this);
+    if (thread_pool_) {
+        pool_task_active_.store(true, std::memory_order_release);
+        thread_pool_->post([this]() { run_loop(); });
+    } else {
+        thread_ = std::thread(&MetricsServer::run_loop, this);
+    }
 }
 
 void MetricsServer::stop() {
-    running_ = false;
-    if (listener_fd_ >= 0)
-        ::close(listener_fd_);
+    if (!running_.exchange(false))
+        return;
+
+    if (listener_fd_ >= 0) {
+        int fd = listener_fd_;
+        listener_fd_ = -1;
+        ::close(fd);
+    }
+
     if (thread_.joinable())
         thread_.join();
+
+    while (pool_task_active_.load(std::memory_order_acquire)) {
+        usleep(1000);
+    }
 }
 
 void MetricsServer::run_loop() {
@@ -82,9 +102,17 @@ void MetricsServer::run_loop() {
             continue;
         }
 
-        handle_request(client_fd);
-        ::close(client_fd);
+        if (thread_pool_) {
+            thread_pool_->post([client_fd]() {
+                handle_request(client_fd);
+                ::close(client_fd);
+            });
+        } else {
+            handle_request(client_fd);
+            ::close(client_fd);
+        }
     }
+    pool_task_active_.store(false, std::memory_order_release);
 }
 
 void MetricsServer::handle_request(int client_fd) {

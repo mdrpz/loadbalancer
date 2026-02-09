@@ -51,6 +51,8 @@ public:
 
     void apply_config(const std::shared_ptr<const lb::config::Config>& config);
 
+    ThreadPool* thread_pool() const;
+
 private:
     void handle_accept();
 
@@ -140,6 +142,10 @@ private:
     void check_backpressure_timeouts();
 
     std::unique_ptr<ThreadPool> thread_pool_;
+
+    std::shared_ptr<const lb::config::Config> pending_config_;
+    std::mutex pending_config_mutex_;
+    std::atomic<bool> config_check_in_progress_{false};
 };
 
 } // namespace lb::core

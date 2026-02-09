@@ -169,6 +169,8 @@ int main(int argc, char* argv[]) {
     std::unique_ptr<lb::metrics::MetricsServer> metrics_server;
     if (metrics_enabled) {
         metrics_server = std::make_unique<lb::metrics::MetricsServer>(metrics_port);
+        if (lb.thread_pool())
+            metrics_server->set_thread_pool(lb.thread_pool());
         metrics_server->start();
         std::cout << "Metrics server listening on port " << metrics_port << "\n";
     }
@@ -182,6 +184,9 @@ int main(int argc, char* argv[]) {
     stop_shutdown_watcher.store(true, std::memory_order_relaxed);
     if (shutdown_watcher.joinable())
         shutdown_watcher.join();
+
+    if (metrics_server)
+        metrics_server->stop();
 
     std::cout << "Load Balancer shutting down...\n";
     logger.info("Load balancer shutting down");
