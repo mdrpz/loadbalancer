@@ -110,7 +110,7 @@ docker run -p 8080:8080 -p 9090:9090 -v $(pwd)/config.yaml:/app/config.yaml load
 
 ## Configuration
 
-Edit `config.yaml` (auto-reloads every 5 seconds):
+Edit `config.yaml` (auto-reloads every ~1 second):
 
 ```yaml
 listener:
@@ -118,6 +118,10 @@ listener:
   port: 8080
   mode: "http"              # "tcp" or "http"
   tls_enabled: false
+  # tls_cert_path: "certs/server.crt"
+  # tls_key_path: "certs/server.key"
+  # tls_handshake_timeout_ms: 10000
+  # use_splice: false       # Experimental zero-copy (TCP mode, Linux only)
 
 backends:
   - host: "127.0.0.1"
@@ -129,10 +133,17 @@ backends:
 
 routing:
   algorithm: "round_robin"  # or "least_connections"
+  # sticky_sessions:
+  #   enabled: true
+  #   method: "cookie"      # "cookie" or "ip"
+  #   cookie_name: "LB_SESSION"
+  #   ttl_seconds: 3600
 
 health_check:
   interval_ms: 5000          # Check interval
   timeout_ms: 500            # Check timeout
+  failure_threshold: 3       # Consecutive failures before marking unhealthy
+  success_threshold: 2       # Consecutive successes before marking healthy
   type: "tcp"                # "tcp" or "http"
   path: "/health"            # HTTP health check path (only used when type: "http")
 
@@ -141,14 +152,46 @@ connection_pool:
   max_connections: 10       # Per backend
 
 logging:
+  level: "info"             # "debug", "info", "warn", "error"
+  # log_file: "/var/log/lb.log"
   access_log_enabled: true
   access_log_file: "/var/log/lb_access.log"
 
 timeouts:
-  request_ms: 30000 
+  request_ms: 30000
+  backpressure_timeout_ms: 10000
 
 memory:
   global_buffer_budget_mb: 512
+
+thread_pool:
+  worker_count: 4           # Background workers (logs, config reload, metrics)
+
+# ip_filter:
+#   whitelist: []
+#   blacklist: []
+
+# rate_limit:
+#   enabled: true
+#   max_connections: 100
+#   window_seconds: 60
+
+# queue:
+#   enabled: true
+#   max_queue_size: 1024
+#   max_wait_ms: 5000
+
+# http_headers:
+#   request:
+#     add:
+#       X-Custom-Header: "value"
+#     remove:
+#       - "X-Unwanted"
+#   response:
+#     add:
+#       X-Frame-Options: "DENY"
+#     remove:
+#       - "Server"
 
 graceful_shutdown:
   timeout_seconds: 30
@@ -158,17 +201,22 @@ graceful_shutdown:
 
 - **HTTP Mode** - Adds `X-Forwarded-For`, `X-Real-IP`, `X-Forwarded-Proto` headers
 - **TLS Termination** - Backends receive plain TCP
-- **Health Checks** - TCP and HTTP health checks with configurable paths
-- **Hot Reload** - Config changes apply without restart
+- **Health Checks** - TCP and HTTP health checks with configurable paths and thresholds
+- **Hot Reload** - Config changes apply without restart (~1 s detection)
 - **Connection Pooling** - Reuses backend connections (-36% p95 latency)
 - **Routing** - Round-robin, least-connections, weighted
+- **Sticky Sessions** - Cookie-based or IP-based session affinity with TTL
 - **Metrics** - Prometheus endpoint at `:9090/metrics`
 - **Access Logging** - Combined log format (like nginx) with per-request logging
-- **Request Timeouts** - Automatic connection timeout for slow clients with per-request logging
+- **Request Timeouts** - Automatic connection timeout for slow clients
+- **Backpressure** - Pauses reads when write buffers fill; times out stalled connections
+- **Memory Budget** - Global buffer cap prevents runaway memory usage
+- **Request Queuing** - Queues connections when at capacity instead of dropping immediately
 - **IP Filtering** - Whitelist/blacklist IP addresses for security
-- **HTTP Error Responses** - Proper HTTP error responses when rejecting connections
-- **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests and responses
 - **Connection Rate Limiting** - Limit connections per IP address to prevent abuse
+- **Custom HTTP Headers** - Add, modify, or remove HTTP headers in requests and responses
+- **Thread Pool** - Background workers for log flushing, config reload, and metrics serving
+- **Zero-Copy Splice** - Experimental `splice()` fast-path for TCP mode (Linux only)
 - **Graceful Shutdown** - Drains active connections before shutdown (configurable timeout)
 
 ## Architecture
@@ -189,6 +237,8 @@ graceful_shutdown:
                     | Metrics :9090  |
                     +----------------+
 ```
+
+For detailed internals (threading model, connection lifecycle, error model, shutdown sequence), see [architecture.md](architecture.md).
 
 ## Tests & Benchmarks
 
