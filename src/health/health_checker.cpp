@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <algorithm>
 #include <chrono>
+#include <exception>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -68,16 +69,34 @@ void HealthChecker::stop() {
 
 void HealthChecker::run_loop() {
     while (running_) {
-        std::vector<std::shared_ptr<lb::core::BackendNode>> backends_copy;
-        {
-            std::lock_guard<std::mutex> lock(backends_mutex_);
-            backends_copy = backends_;
-        }
+        try {
+            std::vector<std::shared_ptr<lb::core::BackendNode>> backends_copy;
+            {
+                std::lock_guard<std::mutex> lock(backends_mutex_);
+                backends_copy = backends_;
+            }
 
-        for (auto& backend : backends_copy) {
-            if (!running_)
-                break;
-            check_backend(backend);
+            for (auto& backend : backends_copy) {
+                if (!running_)
+                    break;
+                try {
+                    check_backend(backend);
+                } catch (const std::exception& e) {
+                    lb::logging::Logger::instance().error(
+                        "Health check failed for backend " + backend->host() + ":" +
+                        std::to_string(backend->port()) + ": " + e.what());
+                } catch (...) {
+                    lb::logging::Logger::instance().error(
+                        "Health check failed for backend " + backend->host() + ":" +
+                        std::to_string(backend->port()) + ": unknown exception");
+                }
+            }
+        } catch (const std::exception& e) {
+            lb::logging::Logger::instance().error(std::string("Health checker loop exception: ") +
+                                                  e.what());
+        } catch (...) {
+            lb::logging::Logger::instance().error(
+                "Health checker loop encountered an unknown exception");
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms_.load()));
     }

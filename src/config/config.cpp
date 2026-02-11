@@ -10,10 +10,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include "logging/logger.h"
 
 namespace lb::config {
 
-ConfigManager::ConfigManager() : last_modified_time_(0), yaml_cpp_warning_shown_(false) {
+ConfigManager::ConfigManager()
+    : last_modified_time_(0), yaml_cpp_warning_shown_(false), config_deleted_warning_shown_(false) {
     config_ = std::make_shared<Config>();
     config_->listen_host = "0.0.0.0";
     config_->listen_port = 8080;
@@ -352,6 +354,7 @@ bool ConfigManager::load_from_file(const std::string& path) {
         config_ = new_config;
         config_path_ = path;
         last_modified_time_ = get_file_mtime(path);
+        config_deleted_warning_shown_ = false;
         return true;
     } catch (const YAML::Exception& e) {
         std::cerr << "YAML parsing error in " << path << ": " << e.what() << std::endl;
@@ -392,6 +395,20 @@ bool ConfigManager::check_and_reload() {
 #endif
 
     std::time_t current_mtime = get_file_mtime(config_path_);
+
+    if (current_mtime == 0 && last_modified_time_ > 0) {
+        if (!config_deleted_warning_shown_) {
+            lb::logging::Logger::instance().warn("Config file '" + config_path_ +
+                                                 "' was deleted. Keeping previous configuration.");
+            config_deleted_warning_shown_ = true;
+        }
+        return false;
+    }
+
+    if (current_mtime > 0 && config_deleted_warning_shown_) {
+        config_deleted_warning_shown_ = false;
+    }
+
     if (current_mtime > last_modified_time_)
         return load_from_file(config_path_);
     return false;

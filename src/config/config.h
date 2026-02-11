@@ -107,6 +107,7 @@ private:
     std::string config_path_;
     std::time_t last_modified_time_;
     bool yaml_cpp_warning_shown_;
+    bool config_deleted_warning_shown_;
 
     [[nodiscard]] static std::time_t get_file_mtime(const std::string& path);
 };
