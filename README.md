@@ -1,6 +1,12 @@
 # C++ Load Balancer
 
 [![CI](https://github.com/mdrpz/Loadbalancer/actions/workflows/ci.yml/badge.svg)](https://github.com/mdrpz/Loadbalancer/actions/workflows/ci.yml)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-blue?logo=cplusplus)
+![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![CMake](https://img.shields.io/badge/CMake-3.20+-064F8C?logo=cmake&logoColor=white)
+![OpenSSL](https://img.shields.io/badge/OpenSSL-TLS-721412?logo=openssl&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-epoll-FCC624?logo=linux&logoColor=black)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 High-performance TCP/HTTP load balancer using C++20 and epoll.
 
