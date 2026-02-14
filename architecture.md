@@ -23,7 +23,9 @@ Clients connect to a **TcpListener** that hands accepted fds to the **LoadBalanc
 
   ThreadPool (N workers) <-- Logger / AccessLogger
                              MetricsServer (:9090)
-                             TlsContext (OpenSSL)
+                             ConfigManager (hot-reload)
+
+  TlsContext (OpenSSL) -------> Connection (SSL wrapping, reactor thread)
 ```
 
 ### Namespaces
@@ -109,7 +111,7 @@ Singleton async logger. Enqueues formatted log lines; drains via internal worker
 Singleton async access logger (combined format). Same dual-mode drain as Logger.
 
 **`MetricsServer`** (`metrics/metrics_server.h`)
-Standalone HTTP listener on its own port. Serves `/metrics` (Prometheus) and `/health` (JSON). Runs its accept loop on the thread pool or a dedicated thread.
+Standalone HTTP listener on its own port. Serves `/metrics` (Prometheus text format). Runs its accept loop on the thread pool or a dedicated thread.
 
 **`Metrics`** (`metrics/metrics.h`)
 Singleton holding all atomic counters and a latency histogram. `export_prometheus()` serialises to Prometheus text format.
@@ -168,7 +170,7 @@ Same pattern as Logger, posted by `AccessLogger::log()`.
 Posted by the reactor periodic callback every ~1 s (skipped if the previous check is still in-flight). Stats the config file, parses YAML if changed, stores a new snapshot into `pending_config_` for the reactor to apply.
 
 **MetricsServer accept loop**
-Posted by `MetricsServer::start()`. Long-running task that blocks on `accept()` with a 100 ms timeout, then posts per-request handler tasks back to the pool.
+Posted by `MetricsServer::start()`. Long-running task that polls `accept()` on a non-blocking socket with a 10 ms sleep between retries, then posts per-request handler tasks back to the pool.
 
 **MetricsServer request handler**
 Posted by the accept loop, one per HTTP request. Reads the request, calls `Metrics::export_prometheus()` or returns health JSON, sends the response, and closes the client fd.

@@ -1,6 +1,32 @@
 # C++ Load Balancer
 
+[![CI](https://github.com/mdrpz/Loadbalancer/actions/workflows/ci.yml/badge.svg)](https://github.com/mdrpz/Loadbalancer/actions/workflows/ci.yml)
+
 High-performance TCP/HTTP load balancer using C++20 and epoll.
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Backend Setup](#backend-setup)
+- [Docker](#docker)
+- [Configuration](#configuration)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Tests & Benchmarks](#tests--benchmarks)
+- [Code Formatting & Linting](#code-formatting--linting)
+- [TLS Setup](#tls-setup)
+- [Zero-Copy Mode](#zero-copy-mode-experimental)
+- [Access Logging](#access-logging)
+- [Request Timeouts](#request-timeouts)
+- [IP Filtering](#ip-filtering)
+- [Custom HTTP Headers](#custom-http-headers)
+- [Connection Rate Limiting](#connection-rate-limiting)
+- [Request Queuing](#request-queuing)
+- [Sticky Sessions](#sticky-sessions--session-affinity)
+- [Health Checks](#health-checks)
+- [Graceful Shutdown](#graceful-shutdown)
+- [Metrics](#metrics)
+- [Troubleshooting](#troubleshooting)
 
 ## Quick Start
 
@@ -133,6 +159,8 @@ backends:
 
 routing:
   algorithm: "round_robin"  # or "least_connections"
+  max_connections_per_backend: 100  # default: 100
+  max_global_connections: 1000     # default: 1000
   # sticky_sessions:
   #   enabled: true
   #   method: "cookie"      # "cookie" or "ip"
@@ -159,7 +187,13 @@ logging:
 
 timeouts:
   request_ms: 30000
-  backpressure_timeout_ms: 10000
+
+backpressure:
+  timeout_ms: 10000
+
+metrics:
+  enabled: true
+  port: 9090
 
 memory:
   global_buffer_budget_mb: 512
@@ -564,25 +598,27 @@ curl http://localhost:9090/metrics
 
 The following metrics are available:
 
-`lb_connections_total` (counter): Total number of connections accepted.
-
-`lb_connections_active` (gauge): Current number of active connections.
-
-`lb_bytes_received_total` (counter): Total bytes received from clients.
-
-`lb_bytes_sent_total` (counter): Total bytes sent to clients.
-
-`lb_request_duration_ms_bucket` (histogram): Distribution of request latencies.
-
-`lb_backend_requests_total{backend="..."}` (counter): Number of requests per backend.
-
-`lb_backend_errors_total{backend="..."}` (counter): Number of errors per backend.
-
-`lb_request_timeouts_total` (counter): Number of timed out requests.
-
-`lb_rate_limit_drops_total` (counter): Number of connections dropped due to rate limiting.
-
-`lb_overload_drops_total` (counter): Number of requests dropped due to overload.
+| Metric | Type | Description |
+|---|---|---|
+| `lb_connections_total` | counter | Total connections accepted |
+| `lb_connections_active` | gauge | Current active connections |
+| `lb_bytes_received_total` | counter | Total bytes received from clients |
+| `lb_bytes_sent_total` | counter | Total bytes sent to clients |
+| `lb_request_duration_ms_bucket` | histogram | Request latency distribution |
+| `lb_backend_requests_total{backend="..."}` | counter | Requests routed per backend |
+| `lb_backend_errors_total{backend="..."}` | counter | Errors per backend |
+| `lb_backend_routes_failed_total` | counter | Connections that failed to route to any backend |
+| `lb_overload_drops_total` | counter | Connections dropped due to overload |
+| `lb_request_timeouts_total` | counter | Requests that timed out |
+| `lb_rate_limit_drops_total` | counter | Connections dropped due to rate limiting |
+| `lb_queue_drops_total` | counter | Connections dropped due to queue limits/timeouts |
+| `lb_memory_budget_drops_total` | counter | Connections dropped due to memory budget |
+| `lb_memory_budget_used_bytes` | gauge | Current memory budget usage |
+| `lb_memory_budget_limit_bytes` | gauge | Memory budget limit |
+| `lb_bad_requests_total` | counter | Invalid HTTP requests (400) |
+| `lb_backpressure_events_total` | counter | Backpressure events triggered |
+| `lb_backpressure_timeouts_total` | counter | Connections closed due to backpressure timeout |
+| `lb_backpressure_active` | gauge | Connections currently in backpressure |
 
 ## Troubleshooting
 
